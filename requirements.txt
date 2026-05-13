@@ -1,0 +1,11 @@
+flask>=3.0.0
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+pandas>=2.0.0
+lxml>=5.0.0
+dnspython>=2.4.0
+python-jobspy>=1.1.0
+pymongo[srv]>=4.6.0
+phonenumbers>=8.13.0
+email-validator>=2.1.0
+gunicorn>=21.2.0

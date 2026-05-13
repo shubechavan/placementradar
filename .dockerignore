@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.git/
+.gitignore
+.env
+.env.*
+*.log
+server.log
+server2.log
+.claude/
+*.bat
+*.command
+.DS_Store

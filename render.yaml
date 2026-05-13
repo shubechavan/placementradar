@@ -1,0 +1,28 @@
+# Render Infrastructure-as-Code
+# Docs: https://render.com/docs/render-yaml-reference
+#
+# Deploy: connect your GitHub repo in the Render dashboard,
+# it will auto-detect this file and create the service.
+
+services:
+  - type: web
+    name: placementradar
+    runtime: docker                  # use our Dockerfile
+    dockerfilePath: ./Dockerfile
+
+    # Free plan — 512 MB RAM, shared CPU, US Oregon region
+    plan: free
+
+    # Render auto-deploys when GitHub main branch changes
+    branch: main
+    autoDeploy: true
+
+    healthCheckPath: /api/dashboard  # Render pings this to verify the deploy is healthy
+
+    envVars:
+      - key: MONGO_URI
+        sync: false                  # set manually in Render dashboard (never in git)
+
+    # Keep the free instance responsive between requests
+    # Render free tier sleeps after 15 min — UptimeRobot (free) pings /api/dashboard
+    # every 5 minutes to prevent this.

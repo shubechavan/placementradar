@@ -1,0 +1,39 @@
+version: "3.9"
+
+# ── Local development — mirrors production layout ─────────────────────────────
+# Usage:
+#   cp .env.example .env        # fill in MONGO_URI
+#   docker compose up --build
+
+services:
+  web:
+    build: .
+    ports:
+      - "5000:5000"
+    env_file:
+      - .env
+    # Override CMD for hot-reload in dev
+    command: python app.py
+    volumes:
+      - .:/app          # live-reload: code changes reflect immediately
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/api/dashboard')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+# ── Future microservices split (uncomment to split worker out) ─────────────────
+# When scraping load grows, extract the background worker into its own container:
+#
+#  worker:
+#    build: .
+#    command: python worker.py      # would contain the scrape/enrich loop
+#    env_file:
+#      - .env
+#    depends_on:
+#      - web
+#
+# Both services share MongoDB as the message queue (jobs collection status field).
+# No Redis needed at this scale.
