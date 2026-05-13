@@ -458,3 +458,39 @@ def toggle_custom_site(site_id: str, enabled: bool):
         {'_id': site_id},
         {'$set': {'enabled': enabled}}
     )
+
+
+# ── Scrape Job Tracking (GitHub Actions worker writes here) ───────────────────
+def create_scrape_job(job_id: str, search_id: str, params: dict):
+    _get_db().scrape_jobs.insert_one({
+        '_id':        job_id,
+        'search_id':  search_id,
+        'params':     params,
+        'status':     'queued',
+        'progress':   0,
+        'message':    'Queued — waiting for GitHub Actions runner to start...',
+        'stats':      {},
+        'count':      0,
+        'created_at': datetime.now().isoformat(),
+    })
+
+
+def update_scrape_job(job_id: str, **kwargs):
+    _get_db().scrape_jobs.update_one({'_id': job_id}, {'$set': kwargs})
+
+
+def get_scrape_job(job_id: str):
+    doc = _get_db().scrape_jobs.find_one({'_id': job_id})
+    if doc:
+        doc['id'] = str(doc.pop('_id'))
+    return doc
+
+
+def get_scrape_results_by_search(search_id: str):
+    """Return jobs saved under a given search_id (populated by the worker)."""
+    db  = _get_db()
+    out = []
+    for r in db.jobs.find({'search_id': search_id}, {'description': 0}):
+        r['id'] = str(r.pop('_id'))
+        out.append(_sanitize_doc(r))
+    return out

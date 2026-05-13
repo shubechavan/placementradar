@@ -2,20 +2,59 @@
 app.py — PlacementRadar v4 Flask backend
 """
 from flask import Flask, render_template, request, jsonify, send_file
-import threading, uuid, io
+import threading, uuid, io, os, json
+import requests as _req
 import pandas as pd
 from database import (init_db, get_settings, save_settings, save_search,
                       get_custom_sites, save_custom_site, delete_custom_site, toggle_custom_site,
                       update_search_count, get_searches, save_jobs,
                       get_all_jobs, update_job, get_dashboard_stats,
                       save_outreach, get_outreach,
-                      get_jobs_without_contacts, update_job_contacts)
+                      get_jobs_without_contacts, update_job_contacts,
+                      create_scrape_job, update_scrape_job, get_scrape_job,
+                      get_scrape_results_by_search)
 
 app = Flask(__name__)
 init_db()
 
-# In-memory scrape job tracker
+# In-memory tracker — used as fallback when GITHUB_PAT not set (local dev)
 scrape_jobs = {}
+
+GITHUB_OWNER = 'shubechavan'
+GITHUB_REPO  = 'placementradar'
+
+def _trigger_github_scrape(job_id, search_id, data):
+    """Dispatch the scrape.yml workflow on GitHub Actions. Returns True on success."""
+    token = os.environ.get('GITHUB_PAT', '')
+    if not token:
+        return False  # no PAT → fall back to local thread
+    params = {
+        'search_id':          search_id,
+        'search_term':        data.get('search_term', ''),
+        'location':           data.get('location', ''),
+        'sites':              data.get('sites', []),
+        'results_wanted':     data.get('results_wanted', 20),
+        'fetch_contacts':     data.get('fetch_contacts', True),
+        'priority_locations': data.get('priority_locations', ''),
+    }
+    try:
+        resp = _req.post(
+            f'https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}'
+            f'/actions/workflows/scrape.yml/dispatches',
+            headers={
+                'Authorization': f'token {token}',
+                'Accept':        'application/vnd.github.v3+json',
+            },
+            json={'ref': 'main', 'inputs': {
+                'job_id':      job_id,
+                'params_json': json.dumps(params),
+            }},
+            timeout=10,
+        )
+        return resp.status_code == 204
+    except Exception as e:
+        print(f'[GitHub API] trigger failed: {e}')
+        return False
 
 # ── Pages ──────────────────────────────────────────────────────────────────────
 @app.route('/')
@@ -59,9 +98,16 @@ def test_smtp():
 # ── Scraping ───────────────────────────────────────────────────────────────────
 @app.route('/api/scrape', methods=['POST'])
 def start_scrape():
-    data       = request.json
-    job_id     = str(uuid.uuid4())
-    search_id  = str(uuid.uuid4())
+    data      = request.json
+    job_id    = str(uuid.uuid4())
+    search_id = str(uuid.uuid4())
+
+    # ── GitHub Actions path (production) ─────────────────────────────────────
+    if _trigger_github_scrape(job_id, search_id, data):
+        create_scrape_job(job_id, search_id, data)
+        return jsonify({'job_id': job_id})
+
+    # ── Local thread fallback (no GITHUB_PAT set — dev mode) ─────────────────
     scrape_jobs[job_id] = {'status':'running','progress':0,
                            'results':[],'message':'Initializing...','stats':{}}
 
@@ -216,17 +262,34 @@ def start_scrape():
 
 @app.route('/api/status/<job_id>')
 def get_status(job_id):
+    # Check MongoDB first (GitHub Actions jobs)
+    doc = get_scrape_job(job_id)
+    if doc:
+        return jsonify({
+            'status':   doc.get('status', 'queued'),
+            'progress': doc.get('progress', 0),
+            'message':  doc.get('message', ''),
+            'count':    doc.get('count', 0),
+            'stats':    doc.get('stats', {}),
+        })
+    # Fall back to in-memory (local dev thread mode)
     j = scrape_jobs.get(job_id)
-    if not j: return jsonify({'error':'Not found'}), 404
+    if not j: return jsonify({'error': 'Not found'}), 404
     return jsonify({'status':j['status'],'progress':j['progress'],
                     'message':j['message'],'count':len(j.get('results',[])),
                     'stats':j.get('stats',{})})
 
 @app.route('/api/results/<job_id>')
 def get_results(job_id):
+    # Check MongoDB first (GitHub Actions jobs)
+    doc = get_scrape_job(job_id)
+    if doc:
+        results = get_scrape_results_by_search(doc.get('search_id', ''))
+        return jsonify({'results': results})
+    # Fall back to in-memory (local dev)
     j = scrape_jobs.get(job_id)
-    if not j: return jsonify({'error':'Not found'}), 404
-    return jsonify({'results': j.get('results',[])})
+    if not j: return jsonify({'error': 'Not found'}), 404
+    return jsonify({'results': j.get('results', [])})
 
 @app.route('/api/debug/<job_id>')
 def debug_job(job_id):

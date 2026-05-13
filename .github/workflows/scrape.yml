@@ -1,0 +1,35 @@
+name: Scrape Jobs
+
+on:
+  workflow_dispatch:
+    inputs:
+      job_id:
+        description: "Scrape job UUID (set by Flask)"
+        required: true
+      params_json:
+        description: "JSON-encoded search parameters"
+        required: true
+
+jobs:
+  scrape:
+    name: Run Scraper
+    runs-on: ubuntu-latest
+    timeout-minutes: 20      # hard cap — GitHub kills the job if it runs over
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run scraper + enricher
+        env:
+          MONGO_URI:   ${{ secrets.MONGO_URI }}
+          JOB_ID:      ${{ inputs.job_id }}
+          PARAMS_JSON: ${{ inputs.params_json }}
+        run: python scrape_worker.py
