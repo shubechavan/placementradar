@@ -25,7 +25,7 @@ GITHUB_REPO  = 'placementradar'
 
 def _trigger_github_scrape(job_id, search_id, data):
     """Dispatch the scrape.yml workflow on GitHub Actions. Returns True on success."""
-    token = os.environ.get('GITHUB_PAT', '')
+    token = os.environ.get('GH_PAT', '')
     if not token:
         return False  # no PAT → fall back to local thread
     params = {
