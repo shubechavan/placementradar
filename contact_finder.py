@@ -297,7 +297,7 @@ def _enrich_single_job(job, cache, cache_lock, serper_key=''):
         # Submit all sources in parallel without using `with` — so that slow
         # company-site scrapers (up to 22 sequential HTTP pages) don't block
         # the whole job when we already have results from faster sources.
-        sub = concurrent.futures.ThreadPoolExecutor(max_workers=5)
+        sub = concurrent.futures.ThreadPoolExecutor(max_workers=8)
         fetch_futs = {}
         if site_cached is _MISS and base_url and site_ck:
             fetch_futs['site']  = sub.submit(_scrape_company_site, base_url, company_domain, has_real_url)
@@ -306,24 +306,30 @@ def _enrich_single_job(job, cache, cache_lock, serper_key=''):
         if jd_cached is _MISS and company:
             fetch_futs['jd']    = sub.submit(_scrape_justdial, company, location)
         if company:
-            fetch_futs['im']    = sub.submit(_scrape_indiamart, company)
+            fetch_futs['im']        = sub.submit(_scrape_indiamart, company)
+            fetch_futs['sulekha']   = sub.submit(_scrape_sulekha, company, location)
+            fetch_futs['tradeindia'] = sub.submit(_scrape_tradeindia, company)
+        if base_url and site_ck:
+            fetch_futs['photon'] = sub.submit(_photon_crawl, base_url, company_domain or '')
         if serper_key and company:
             fetch_futs['serp']  = sub.submit(_search_serper, company, location, serper_key)
 
         def _get(key, default):
             if key in fetch_futs:
-                # Serper runs 2 parallel sub-requests internally; give it extra headroom
-                t = 15 if key == 'serp' else 12
+                t = 15 if key == 'serp' else 20 if key == 'photon' else 12
                 try: return fetch_futs[key].result(timeout=t) or default
                 except Exception: return default
             v = _cached_lookup.get(key, _SKIP)
             return v if v not in (_MISS, _SKIP) else default
 
-        site_data  = _get('site',  {'emails': [], 'phones': []})
-        zauba_data = _get('zauba', {'emails': [], 'phones': []})
-        jd_data    = _get('jd',    {'phones': []})
-        im_data    = _get('im',    {'phones': []})
-        serp_data  = _get('serp',  {'phones': [], 'emails': []})
+        site_data       = _get('site',       {'emails': [], 'phones': []})
+        zauba_data      = _get('zauba',      {'emails': [], 'phones': []})
+        jd_data         = _get('jd',         {'phones': []})
+        im_data         = _get('im',         {'phones': []})
+        sulekha_data    = _get('sulekha',    {'phones': []})
+        tradeindia_data = _get('tradeindia', {'phones': []})
+        photon_data     = _get('photon',     {'emails': [], 'phones': []})
+        serp_data       = _get('serp',       {'phones': [], 'emails': []})
 
         # Release executor — any still-running site scraper threads will complete
         # in the background without blocking this job's result collection.
@@ -342,15 +348,21 @@ def _enrich_single_job(job, cache, cache_lock, serper_key=''):
         for e in (zauba_data.get('emails') or []):
             if e not in emails_web: emails_web.append(e)
             sources.setdefault(e, '🏢 Zauba Corp')
+        for e in (photon_data.get('emails') or []):
+            if e not in emails_web: emails_web.append(e)
+            sources.setdefault(e, '🕷️ Deep Crawl')
         for e in (serp_data.get('emails') or []):
             if e not in emails_web: emails_web.append(e)
             sources.setdefault(e, '🔍 Google Search')
 
-        # Merge phones — JustDial + IndiaMART + Serper FIRST (highest confidence)
+        # Merge phones — directories first (highest confidence), then site, then deep crawl
         for src_phones in [jd_data.get('phones') or [],
                            im_data.get('phones') or [],
+                           sulekha_data.get('phones') or [],
+                           tradeindia_data.get('phones') or [],
                            serp_data.get('phones') or [],
-                           site_data.get('phones') or []]:
+                           site_data.get('phones') or [],
+                           photon_data.get('phones') or []]:
             for p in src_phones:
                 if p not in phones: phones.append(p)
 
@@ -735,6 +747,174 @@ def _search_serper(company_name, location, serper_key):
                 result['emails'].append(e)
 
     except Exception: pass
+    return result
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# STEP 5d — Photon-style deep site crawl (inspired by s0md3v/Photon)
+#           Follows discovered internal links to find tel: links on pages
+#           that the fixed-path scraper never checks.
+# ═════════════════════════════════════════════════════════════════════════════
+def _photon_crawl(base_url, domain, max_pages=12):
+    result = {'emails': [], 'phones': []}
+    if not base_url: return result
+    try:
+        if not base_url.startswith('http'):
+            base_url = 'https://' + base_url
+        parsed      = urlparse(base_url)
+        base_domain = parsed.netloc.lower()
+
+        visited = set()
+        # High-priority queue (contact/HR pages) + normal queue
+        hi_queue, lo_queue = [], [base_url]
+
+        _PRIORITY_KW = ('contact', 'about', 'team', 'hr', 'career', 'people',
+                        'reach', 'office', 'location', 'support')
+
+        while len(visited) < max_pages:
+            queue = hi_queue or lo_queue
+            if not queue: break
+            url = (hi_queue if hi_queue else lo_queue).pop(0)
+            if url in visited: continue
+            visited.add(url)
+
+            try:
+                r = requests.get(url, headers=HEADERS, timeout=5, allow_redirects=True)
+                if r.status_code != 200: continue
+                if urlparse(r.url).netloc.lower() != base_domain: continue
+
+                soup = BeautifulSoup(r.text, 'lxml')
+
+                for p in _extract_phones_from_page(soup):
+                    if p not in result['phones']:
+                        result['phones'].append(p)
+
+                text = soup.get_text(' ')
+                em, _ = _extract_from_desc(text)
+                for e in em:
+                    if _is_valid_email(e) and (not domain or _matches_domain(e, domain)):
+                        if e not in result['emails']:
+                            result['emails'].append(e)
+
+                if result['phones'] and len(result['phones']) >= 2:
+                    break
+
+                for a in soup.find_all('a', href=True):
+                    href = a['href'].split('?')[0].split('#')[0]
+                    if href.startswith('/'):
+                        full = f"{parsed.scheme}://{base_domain}{href}"
+                    elif href.startswith(('http://', 'https://')):
+                        if urlparse(href).netloc.lower() != base_domain:
+                            continue
+                        full = href
+                    else:
+                        continue
+                    if full in visited: continue
+                    if any(k in href.lower() for k in _PRIORITY_KW):
+                        hi_queue.append(full)
+                    else:
+                        lo_queue.append(full)
+
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return result
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# STEP 5e — Sulekha (Indian business directory, parallel to JustDial)
+# ═════════════════════════════════════════════════════════════════════════════
+def _scrape_sulekha(company_name, location='india'):
+    result = {'phones': []}
+    try:
+        clean = re.sub(
+            r'\s+(pvt\.?|ltd\.?|limited|private|technologies|tech|solutions|services|india|group)\.?\s*$',
+            '', company_name.strip(), flags=re.I).strip()
+        city = location.split(',')[0].strip() or 'india'
+        r = requests.get(
+            f'https://www.sulekha.com/search-results?searchkey={quote_plus(clean)}'
+            f'&cityName={quote_plus(city)}',
+            headers={**HEADERS, 'Referer': 'https://www.sulekha.com/'},
+            timeout=6)
+        if r.status_code != 200: return result
+        soup = BeautifulSoup(r.text, 'lxml')
+
+        for a in soup.select('a[href^="tel:"]'):
+            d = _parse_phone_raw(a['href'].replace('tel:', ''))
+            if d and d not in result['phones']:
+                result['phones'].append(d)
+
+        for el in soup.select('[data-phone],[data-mobile],[data-contact]'):
+            raw = el.get('data-phone') or el.get('data-mobile') or el.get('data-contact') or ''
+            d = _parse_phone_raw(raw)
+            if d and d not in result['phones']:
+                result['phones'].append(d)
+
+        if not result['phones']:
+            # Find first listing card and extract phones from its text block
+            card = soup.select_one('[class*="listing"],[class*="card"],[class*="result"]')
+            if card:
+                for p in _extract_phones_from_text(card.get_text(' ')):
+                    if p not in result['phones']:
+                        result['phones'].append(p)
+    except Exception:
+        pass
+    return result
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# STEP 5f — TradeIndia (B2B directory — reliable for registered Indian companies)
+# ═════════════════════════════════════════════════════════════════════════════
+def _scrape_tradeindia(company_name):
+    result = {'phones': []}
+    try:
+        clean = re.sub(
+            r'\s+(pvt\.?|ltd\.?|limited|private|technologies|tech|solutions|services|india|group)\.?\s*$',
+            '', company_name.strip(), flags=re.I).strip()
+        r = requests.get(
+            f'https://www.tradeindia.com/search/?search_text={quote_plus(clean)}&category=company',
+            headers={**HEADERS, 'Referer': 'https://www.tradeindia.com/'},
+            timeout=6)
+        if r.status_code != 200: return result
+        soup = BeautifulSoup(r.text, 'lxml')
+
+        for a in soup.select('a[href^="tel:"]'):
+            d = _parse_phone_raw(a['href'].replace('tel:', ''))
+            if d and d not in result['phones']:
+                result['phones'].append(d)
+
+        for el in soup.select('[class*="phone"],[class*="contact"],[class*="mobile"],[data-phone]'):
+            raw = el.get('data-phone', '')
+            if raw:
+                d = _parse_phone_raw(raw)
+                if d and d not in result['phones']:
+                    result['phones'].append(d)
+            else:
+                for p in _extract_phones_from_text(el.get_text(' ')):
+                    if p not in result['phones']:
+                        result['phones'].append(p)
+
+        if not result['phones']:
+            # Try company detail page if search returned a result
+            link = soup.select_one('a[href*="/company/"],a[href*="/profile/"]')
+            if link and link.get('href'):
+                href = link['href']
+                if not href.startswith('http'):
+                    href = 'https://www.tradeindia.com' + href
+                r2 = requests.get(href, headers=HEADERS, timeout=5)
+                if r2.status_code == 200:
+                    soup2 = BeautifulSoup(r2.text, 'lxml')
+                    for a in soup2.select('a[href^="tel:"]'):
+                        d = _parse_phone_raw(a['href'].replace('tel:', ''))
+                        if d and d not in result['phones']:
+                            result['phones'].append(d)
+                    if not result['phones']:
+                        for p in _extract_phones_from_text(soup2.get_text(' ')):
+                            if p not in result['phones']:
+                                result['phones'].append(p)
+    except Exception:
+        pass
     return result
 
 
