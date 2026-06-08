@@ -178,6 +178,11 @@ td.wrap { white-space:normal; }
 .grade-C{background:rgba(255,215,0,.15);color:#ffd700;border:1px solid rgba(255,215,0,.35);}
 .grade-D{background:rgba(255,140,0,.15);color:#ff8c00;border:1px solid rgba(255,140,0,.35);}
 .grade-F{background:rgba(255,68,68,.15);color:#ff5555;border:1px solid rgba(255,68,68,.35);}
+.cbar{display:flex;align-items:center;gap:10px;background:rgba(29,185,84,.05);border:1px solid rgba(29,185,84,.18);border-radius:8px;padding:8px 14px;margin-bottom:12px;flex-wrap:wrap;}
+.cbar-stat{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;color:var(--green);}
+.cbar-stat em{font-style:normal;font-weight:400;color:var(--sub);margin-left:3px;}
+.cbar-sep{width:1px;height:14px;background:var(--bdr2);flex-shrink:0;}
+.cbar-ok{font-size:11px;color:var(--green);font-weight:600;display:none;}
 .bdg-linkedin{background:rgba(10,102,194,.14);color:#4da3ff;} .bdg-indeed{background:rgba(74,127,203,.14);color:#7aaae8;} .bdg-googlejobs{background:rgba(52,211,153,.14);color:#34d399;}
 .bdg-remotive{background:rgba(110,231,183,.14);color:#6ee7b7;}
 .bdg-remoteok{background:rgba(74,222,128,.14);color:#4ade80;}
@@ -431,6 +436,15 @@ textarea:focus{border-color:var(--gold);}
             <button class="btn btn-green btn-sm" onclick="exportSearch()">Export CSV</button>
           </div>
         </div>
+        <div id="s-cbar" class="cbar" style="display:none">
+          <span class="cbar-stat"><span id="scb-ph">0</span><em>phones</em></span>
+          <div class="cbar-sep"></div>
+          <span class="cbar-stat"><span id="scb-em">0</span><em>emails</em></span>
+          <div class="cbar-sep"></div>
+          <button class="btn btn-ghost btn-sm" onclick="copyContacts('s','phone')">📋 Copy All Phones</button>
+          <button class="btn btn-ghost btn-sm" onclick="copyContacts('s','email')">📋 Copy All Emails</button>
+          <span class="cbar-ok" id="scb-ok">✓ Copied!</span>
+        </div>
         <div class="tw">
           <table>
             <thead><tr>
@@ -471,6 +485,15 @@ textarea:focus{border-color:var(--gold);}
           <button class="btn btn-blue btn-sm" id="reenrich-btn" onclick="reEnrichBoard()">Find Contacts</button>
           <button class="btn btn-green btn-sm" onclick="exportAll()">Export CSV</button>
         </div>
+      </div>
+      <div id="b-cbar" class="cbar" style="display:none">
+        <span class="cbar-stat"><span id="bcb-ph">0</span><em>phones</em></span>
+        <div class="cbar-sep"></div>
+        <span class="cbar-stat"><span id="bcb-em">0</span><em>emails</em></span>
+        <div class="cbar-sep"></div>
+        <button class="btn btn-ghost btn-sm" onclick="copyContacts('b','phone')">📋 Copy All Phones</button>
+        <button class="btn btn-ghost btn-sm" onclick="copyContacts('b','email')">📋 Copy All Emails</button>
+        <span class="cbar-ok" id="bcb-ok">✓ Copied!</span>
       </div>
       <div class="tw">
         <table>
@@ -788,7 +811,7 @@ async function loadSResults(){
   document.getElementById('s-stats').style.display='grid';
   const sf=document.getElementById('sf-site');sf.innerHTML='<option value="">All Sites</option>';
   [...new Set(searchResults.map(r=>r.site).filter(Boolean))].forEach(s=>sf.add(new Option(s.charAt(0).toUpperCase()+s.slice(1),s)));
-  renderSTable();document.getElementById('s-results').style.display='block';
+  renderSTable();document.getElementById('s-results').style.display='block';updateCbar('s',searchResults);
 }
 function filterSearch(){
   const q=document.getElementById('sf-q').value.toLowerCase();
@@ -799,7 +822,7 @@ function filterSearch(){
     if(cond==='any'&&!r.emails&&!r.phone)return false;
     if(cond==='email'&&!r.emails)return false;if(cond==='phone'&&!r.phone)return false;
     return true;
-  });sPage=1;renderSTable();
+  });sPage=1;renderSTable();updateCbar('s',filteredS);
 }
 function sortS(k){if(sSort===k)sSortD*=-1;else{sSort=k;sSortD=1;}filteredS.sort((a,b)=>{const av=(a[k]||'').toLowerCase();const bv=(b[k]||'').toLowerCase();return av<bv?-sSortD:av>bv?sSortD:0;});renderSTable();}
 function renderSTable(){
@@ -873,8 +896,39 @@ function filterBoard(){
     if(cond==='none'&&(hasEmail(r)||hasPhone(r)))return false;
     return true;
   });
-  bPage=1;renderBTable();
+  bPage=1;renderBTable();updateCbar('b',filteredB);
 }
+function _uniqPhones(arr){return[...new Set(arr.flatMap(r=>(r.phone&&r.phone!=='—')?r.phone.split(', ').map(p=>p.trim()).filter(Boolean):[]))];}
+function _uniqEmails(arr){return[...new Set(arr.flatMap(r=>r.emails?r.emails.split(', ').map(e=>e.trim()).filter(Boolean):[]))];}
+function updateCbar(src,arr){
+  const phones=_uniqPhones(arr),emails=_uniqEmails(arr);
+  const show=phones.length||emails.length;
+  if(src==='s'){
+    const bar=document.getElementById('s-cbar');if(!bar)return;
+    bar.style.display=show?'flex':'none';
+    document.getElementById('scb-ph').textContent=phones.length;
+    document.getElementById('scb-em').textContent=emails.length;
+  }else{
+    const bar=document.getElementById('b-cbar');if(!bar)return;
+    bar.style.display=show?'flex':'none';
+    document.getElementById('bcb-ph').textContent=phones.length;
+    document.getElementById('bcb-em').textContent=emails.length;
+  }
+}
+function copyContacts(src,type){
+  const arr=src==='s'?filteredS:filteredB;
+  const items=type==='phone'?_uniqPhones(arr):_uniqEmails(arr);
+  if(!items.length){toast(`No ${type}s in current view`,'error');return;}
+  const text=items.join('\n');
+  const okId=src==='s'?'scb-ok':'bcb-ok';
+  const done=()=>{
+    const el=document.getElementById(okId);if(el){el.style.display='inline';setTimeout(()=>el.style.display='none',2000);}
+    toast(`Copied ${items.length} ${type}${items.length>1?'s':''}!`,'success');
+  };
+  if(navigator.clipboard){navigator.clipboard.writeText(text).then(done).catch(()=>{_fallbackCopy(text);done();});}
+  else{_fallbackCopy(text);done();}
+}
+function _fallbackCopy(text){const ta=document.createElement('textarea');ta.value=text;ta.style.position='fixed';ta.style.opacity='0';document.body.appendChild(ta);ta.focus();ta.select();try{document.execCommand('copy');}catch(e){}document.body.removeChild(ta);}
 function contactGrade(r){
   let s=0;
   if(r.phone&&r.phone.trim()&&r.phone!=='—')s+=35;
