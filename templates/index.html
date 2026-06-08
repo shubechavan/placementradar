@@ -172,6 +172,12 @@ td.wrap { white-space:normal; }
 
 /* Badges & pills */
 .bdg { display:inline-block; padding:2px 7px; border-radius:4px; font-size:10px; font-weight:600; font-family:'JetBrains Mono',monospace; white-space:nowrap; background:rgba(255,255,255,.06); color:var(--sub); }
+.grade{display:inline-flex;align-items:center;justify-content:center;width:19px;height:19px;border-radius:4px;font-size:10px;font-weight:800;font-family:'JetBrains Mono',monospace;vertical-align:middle;margin-right:4px;flex-shrink:0;}
+.grade-A{background:rgba(29,185,84,.15);color:#1db954;border:1px solid rgba(29,185,84,.35);}
+.grade-B{background:rgba(74,158,255,.15);color:#4a9eff;border:1px solid rgba(74,158,255,.35);}
+.grade-C{background:rgba(255,215,0,.15);color:#ffd700;border:1px solid rgba(255,215,0,.35);}
+.grade-D{background:rgba(255,140,0,.15);color:#ff8c00;border:1px solid rgba(255,140,0,.35);}
+.grade-F{background:rgba(255,68,68,.15);color:#ff5555;border:1px solid rgba(255,68,68,.35);}
 .bdg-linkedin{background:rgba(10,102,194,.14);color:#4da3ff;} .bdg-indeed{background:rgba(74,127,203,.14);color:#7aaae8;} .bdg-googlejobs{background:rgba(52,211,153,.14);color:#34d399;}
 .bdg-remotive{background:rgba(110,231,183,.14);color:#6ee7b7;}
 .bdg-remoteok{background:rgba(74,222,128,.14);color:#4ade80;}
@@ -642,7 +648,10 @@ textarea:focus{border-color:var(--gold);}
           <h3>Contact Discovery Sources</h3>
           <div class="src-grid">
             <div class="src-card"><div class="src-name">Career Page Scraper</div><div class="src-desc">Deep-crawls company websites — /careers, /jobs, /contact — extracts domain-matched emails via mailto links and page text.</div><div class="src-badge">Active · No key needed</div></div>
+            <div class="src-card"><div class="src-name">Photon Deep Crawl</div><div class="src-desc">Follows internal links across the company site (up to 12 pages), prioritising contact/about/team pages — finds phones the fixed-path scraper misses.</div><div class="src-badge">Active · No key needed</div></div>
             <div class="src-card"><div class="src-name">Zauba Corp Registry</div><div class="src-desc">Indian government company database — registered email and phone for every Pvt Ltd and Limited company.</div><div class="src-badge">Active · No key needed</div></div>
+            <div class="src-card"><div class="src-name">Sulekha Directory</div><div class="src-desc">Indian business directory (parallel to JustDial) — reliable phone numbers for SMEs and large enterprises across all cities.</div><div class="src-badge">Active · No key needed</div></div>
+            <div class="src-card"><div class="src-name">TradeIndia B2B</div><div class="src-desc">B2B marketplace directory — follows company detail pages for a second-pass phone fetch when the search page yields nothing.</div><div class="src-badge">Active · No key needed</div></div>
             <div class="src-card"><div class="src-name">Job Description Scan</div><div class="src-desc">Smart regex scan of full job descriptions for contextual contacts — phone, WhatsApp numbers, and mailto links.</div><div class="src-badge">Active · No key needed</div></div>
             <div class="src-card"><div class="src-name">HR Database Lookup</div><div class="src-desc">Local database of 130+ verified Indian HR contacts, self-growing with each search you run.</div><div class="src-badge">Active · Self-learning</div></div>
             <div class="src-card"><div class="src-name">Job Page Fetch</div><div class="src-desc">When a job description is short, fetches the full job page from LinkedIn, Naukri, or Internshala for complete contact details.</div><div class="src-badge">Active · No key needed</div></div>
@@ -866,6 +875,18 @@ function filterBoard(){
   });
   bPage=1;renderBTable();
 }
+function contactGrade(r){
+  let s=0;
+  if(r.phone&&r.phone.trim()&&r.phone!=='—')s+=35;
+  if(r.emails&&r.emails.trim()&&r.emails!=='—')s+=35;
+  if(r.company_url&&r.company_url.trim())s+=15;
+  if(r.emails&&/hr|recruit|talent|hiring|placement/i.test(r.emails))s+=15;
+  if(s>=80)return{g:'A',cls:'grade-A'};
+  if(s>=55)return{g:'B',cls:'grade-B'};
+  if(s>=35)return{g:'C',cls:'grade-C'};
+  if(s>=15)return{g:'D',cls:'grade-D'};
+  return{g:'F',cls:'grade-F'};
+}
 function renderBTable(){
   try{
     const cnt=document.getElementById('b-count');if(cnt)cnt.textContent=`${filteredB.length} of ${boardResults.length} jobs`;
@@ -875,9 +896,10 @@ function renderBTable(){
       const dom=guessDom(r.company_url,r.company);
       const phoneHref=(r.phone&&r.phone!=='—')?r.phone.split(', ')[0].replace(/\s/g,''):'';
       const emailAddr=r.hr_contact||(r.emails?(r.emails.split(',')[0]||'').trim():'');
+      const{g,cls}=contactGrade(r);
       return `<tr style="animation-delay:${i*12}ms">
         <td><div class="co-row"><img class="co-logo" src="https://logo.clearbit.com/${dom}" onerror="this.outerHTML='<div class=co-fb>${esc((r.company||'?')[0])}</div>'"><span title="${esc(r.company)}">${esc(r.company||'—')}</span></div></td>
-        <td style="font-weight:500;max-width:160px" title="${esc(r.title)}">${esc(r.title||'—')}</td>
+        <td style="font-weight:500;max-width:160px" title="${esc(r.title)}"><span class="grade ${cls}" title="Contact grade: ${g}">${g}</span>${esc(r.title||'—')}</td>
         <td style="color:var(--sub);font-size:11px">${esc(r.location||'—')}</td>
         <td><span class="bdg bdg-${(r.site||'').replace('_','')}">${esc(r.site||'—')}</span></td>
         <td class="ec wrap" style="max-width:180px">${r.emails?r.emails.split(', ').slice(0,2).map(e=>`<div>${esc(e)}${e===r.hr_contact?' ★':''}</div>`).join(''):'<span style="color:var(--dim)">—</span>'}</td>
