@@ -11,7 +11,7 @@ Collections:
 """
 
 import os, uuid, re, math
-from datetime import datetime
+from datetime import datetime, timedelta
 from pymongo import MongoClient, DESCENDING, UpdateOne
 from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError
 
@@ -367,6 +367,43 @@ def save_outreach(job_id, company, hr_email, subject, body, status='sent'):
         'status':         status,
         'reply_received': 0,
     })
+
+
+def get_followups_due(days=3, max_followups=2):
+    """
+    Jobs that were emailed >= `days` ago, are still status 'contacted' (no reply),
+    and have had fewer than `max_followups` follow-ups sent.
+    Returns jobs sorted oldest-contact-first, each with last_sent / sends /
+    followup_email fields attached.
+    """
+    db = _get_db()
+    agg = db.outreach.aggregate([
+        {'$match': {'job_id': {'$nin': ['', None]}, 'status': 'sent'}},
+        {'$group': {'_id':       '$job_id',
+                    'last_sent': {'$max': '$sent_at'},
+                    'sends':     {'$sum': 1},
+                    'hr_email':  {'$last': '$hr_email'}}},
+    ])
+    cutoff = (datetime.now() - timedelta(days=days)).isoformat()
+    # sends includes the initial email, so follow-ups sent = sends - 1
+    due = {r['_id']: r for r in agg
+           if r['last_sent'] <= cutoff and (r['sends'] - 1) < max_followups}
+    if not due:
+        return []
+    rows = db.jobs.find({'_id': {'$in': list(due.keys())}, 'status': 'contacted'},
+                        {'description': 0})
+    out = []
+    for j in rows:
+        j['id'] = str(j.pop('_id'))
+        meta = due[j['id']]
+        j['last_sent'] = meta['last_sent']
+        j['sends']     = meta['sends']
+        j['followup_email'] = (meta.get('hr_email')
+                               or j.get('hr_contact')
+                               or (j.get('emails') or '').split(', ')[0].strip())
+        out.append(_sanitize_doc(j))
+    out.sort(key=lambda x: x['last_sent'])
+    return out
 
 
 def get_outreach(limit=100):

@@ -535,6 +535,21 @@ textarea:focus{border-color:var(--gold);}
           <div style="max-height:270px;overflow-y:auto" id="rcp-list"></div>
         </div>
       </div>
+      <div class="card" style="margin-bottom:14px;border-color:rgba(232,160,32,.3)">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:8px">
+          <div class="card-title" style="margin-bottom:0">⏰ Follow-ups Due <span id="fu-cnt" class="bdg" style="margin-left:6px">0</span></div>
+          <div style="display:flex;gap:6px;align-items:center">
+            <select class="fs" id="fu-days" onchange="loadFollowups()" style="font-size:11px;padding:3px 6px">
+              <option value="3" selected>3+ days ago</option>
+              <option value="5">5+ days ago</option>
+              <option value="7">7+ days ago</option>
+            </select>
+            <button class="btn btn-primary btn-sm" id="fu-send" onclick="sendFollowups()">Send Follow-ups</button>
+          </div>
+        </div>
+        <div style="font-size:10px;color:var(--dim);margin-bottom:8px">Companies you contacted that haven't replied — sends your <b>Follow-up</b> template. Max 2 follow-ups per company, then it stops automatically.</div>
+        <div style="max-height:220px;overflow-y:auto" id="fu-list"></div>
+      </div>
       <div class="card">
         <div class="card-title">Sent Log</div>
         <div class="tw" style="border:none">
@@ -1025,6 +1040,31 @@ async function loadOutreach(){
   document.getElementById('rcp-list').innerHTML=rcpData.map(j=>`<div class="rcp-item"><input type="checkbox" class="rc-cb" id="rc-${j.id}" ${j.status!=='contacted'?'checked':''} style="accent-color:var(--gold);width:14px;height:14px;flex-shrink:0"><div class="rcp-info"><div class="rcp-co">${esc(j.company||'—')} · <span style="font-weight:400;color:var(--sub)">${esc(j.title||'')}</span></div><div class="rcp-em">${esc(j.hr_contact||j.emails?.split(',')[0]||'')}</div></div><span class="pill ${scls(j.status||'new')}" style="font-size:9px">${slbl(j.status||'new')}</span></div>`).join('');
   const log=await fetch('/api/outreach/log').then(r=>r.json()).catch(()=>({outreach:[]}));
   document.getElementById('out-log').innerHTML=(log.outreach||[]).map(o=>`<tr><td>${esc(o.company||'—')}</td><td class="ec">${esc(o.hr_email||'—')}</td><td style="color:var(--sub);font-size:11px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(o.subject||'—')}</td><td style="color:var(--dim);font-size:10px;font-family:'JetBrains Mono',monospace">${(o.sent_at||'—').substring(0,16)}</td><td><span class="pill sc3" style="font-size:9px">Sent</span></td></tr>`).join('')||'<tr><td colspan="5" class="empty" style="padding:16px">No emails sent yet</td></tr>';
+  loadFollowups();
+}
+// ── Follow-up engine ──────────────────────────────────────────────────────────
+let fuData=[];
+function daysAgo(iso){try{const d=Math.floor((Date.now()-new Date(iso).getTime())/864e5);return isNaN(d)?'?':d;}catch(e){return '?';}}
+async function loadFollowups(){
+  const days=document.getElementById('fu-days').value;
+  const d=await fetch(`/api/outreach/followups?days=${days}`).then(r=>r.json()).catch(()=>({followups:[]}));
+  fuData=d.followups||[];
+  document.getElementById('fu-cnt').textContent=fuData.length;
+  const el=document.getElementById('fu-list');
+  if(!fuData.length){el.innerHTML='<div style="color:var(--dim);font-size:11px;padding:12px;text-align:center">Nothing due — every contacted company has replied or was followed up recently.</div>';return;}
+  el.innerHTML=fuData.map((j,i)=>`<div class="rcp-item"><input type="checkbox" class="fu-cb" data-idx="${i}" checked style="accent-color:var(--gold);width:14px;height:14px;flex-shrink:0"><div class="rcp-info"><div class="rcp-co">${esc(j.company||'—')} · <span style="font-weight:400;color:var(--sub)">${esc(j.title||'')}</span></div><div class="rcp-em">${esc(j.followup_email||'')}</div></div><span style="font-size:10px;color:var(--dim);font-family:'JetBrains Mono',monospace;flex-shrink:0">${daysAgo(j.last_sent)}d ago · ${(j.sends||1)-1} sent</span></div>`).join('');
+}
+async function sendFollowups(){
+  const ids=[...document.querySelectorAll('.fu-cb:checked')].map(c=>fuData[+c.dataset.idx]).filter(Boolean).map(j=>j.id);
+  if(!ids.length){toast('Select at least one company','error');return;}
+  if(!confirm(`Send follow-up emails to ${ids.length} compan${ids.length===1?'y':'ies'}?`))return;
+  const btn=document.getElementById('fu-send');btn.disabled=true;btn.textContent='Sending...';
+  try{
+    const d=await fetch('/api/outreach/followups/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({job_ids:ids,days:+document.getElementById('fu-days').value})}).then(r=>r.json());
+    if(d.error)toast(d.error,'error');
+    else toast(`${d.sent} follow-up${d.sent===1?'':'s'} sent`,d.sent?'success':'error');
+    loadFollowups();
+  }finally{btn.disabled=false;btn.textContent='Send Follow-ups';}
 }
 function switchTpl(){fetch('/api/settings').then(r=>r.json()).then(s=>{document.getElementById('e-body').value=s[document.getElementById('tpl-pick').value]||'';});}
 async function saveTpl(){const key=document.getElementById('tpl-pick').value;await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({[key]:document.getElementById('e-body').value})});toast('Template saved','success');}

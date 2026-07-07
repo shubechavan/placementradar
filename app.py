@@ -12,7 +12,7 @@ from database import (init_db, get_settings, save_settings, save_search,
                       save_outreach, get_outreach,
                       get_jobs_without_contacts, update_job_contacts,
                       create_scrape_job, update_scrape_job, get_scrape_job,
-                      get_scrape_results_by_search)
+                      get_scrape_results_by_search, get_followups_due)
 
 app = Flask(__name__)
 init_db()
@@ -452,6 +452,46 @@ def bulk_send():
 @app.route('/api/outreach/log')
 def outreach_log():
     return jsonify({'outreach': get_outreach(100)})
+
+# ── Follow-ups ────────────────────────────────────────────────────────────────
+@app.route('/api/outreach/followups')
+def followups_due():
+    """Companies emailed N+ days ago with no reply and < 2 follow-ups sent."""
+    days = request.args.get('days', 3, type=int)
+    return jsonify({'followups': get_followups_due(days=days)})
+
+@app.route('/api/outreach/followups/send', methods=['POST'])
+def send_followups():
+    """Send the follow-up template to selected (or all) due companies."""
+    from email_sender import send_outreach_email, _fill_template
+    import time
+    data     = request.json or {}
+    job_ids  = set(data.get('job_ids') or [])
+    settings = get_settings()
+    tpl      = settings.get('followup_template', '')
+    if not tpl.strip():
+        return jsonify({'results': [], 'sent': 0,
+                        'error': 'Follow-up template is empty — set it in Outreach → Follow-up'})
+
+    results = []
+    for j in get_followups_due(days=data.get('days', 3)):
+        if job_ids and j['id'] not in job_ids:
+            continue
+        email = j.get('followup_email', '')
+        if not email:
+            continue
+        job_data = {'company': j.get('company', ''), 'title': j.get('title', '')}
+        subject  = (f"Re: Campus Hiring — "
+                    f"{settings.get('college_name', 'Our College')} × {j.get('company', '')}")
+        body     = _fill_template(tpl, job_data, settings)
+        res      = send_outreach_email(email, subject, body, settings)
+        res.update({'job_id': j['id'], 'company': j.get('company', ''), 'email': email})
+        if res.get('success'):
+            save_outreach(j['id'], j.get('company', ''), email, subject, body)
+        results.append(res)
+        time.sleep(1.5)   # same pacing as bulk sender — avoids Gmail rate limiting
+    return jsonify({'results': results,
+                    'sent': sum(1 for r in results if r.get('success'))})
 
 # ── Re-enrich existing jobs ───────────────────────────────────────────────────
 @app.route('/api/jobs/enrich', methods=['POST'])

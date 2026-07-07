@@ -326,6 +326,8 @@ init_db()   # connects MongoDB, creates indexes, seeds default settings
 | POST | `/api/outreach/send` | Send single email |
 | POST | `/api/outreach/bulk` | Bulk email selected jobs |
 | GET | `/api/outreach/log` | Email sent history |
+| GET | `/api/outreach/followups` | Companies due for a follow-up (no reply after N days) |
+| POST | `/api/outreach/followups/send` | Send follow-up template to selected companies |
 | GET | `/api/hr-database` | Browse HR contacts |
 | POST | `/api/hr-database/add` | Add contact manually |
 | GET | `/api/custom-sites` | User-defined job sites |
@@ -782,6 +784,36 @@ Log each to MongoDB outreach collection
         ↓
 Update job.status → "contacted"
 ```
+
+### Follow-up Engine
+
+Most outreach replies come from follow-ups, not the first email — so the app
+tracks which contacted companies never replied and queues them automatically.
+
+**Eligibility rule** (computed from the `outreach` log, no new state needed):
+- Job status is still `contacted` (a reply would have moved it to `replied`)
+- Last email was sent ≥ N days ago (user picks 3/5/7 in the UI)
+- Fewer than 2 follow-ups already sent (then it stops — no infinite nagging)
+
+```python
+def get_followups_due(days=3, max_followups=2):
+    agg = db.outreach.aggregate([
+        {'$match': {'job_id': {'$nin': ['', None]}, 'status': 'sent'}},
+        {'$group': {'_id': '$job_id',
+                    'last_sent': {'$max': '$sent_at'},
+                    'sends':     {'$sum': 1}}},
+    ])
+    cutoff = (datetime.now() - timedelta(days=days)).isoformat()
+    due = {r['_id']: r for r in agg
+           if r['last_sent'] <= cutoff and (r['sends'] - 1) < max_followups}
+    # join against jobs still in status 'contacted'
+```
+
+The Outreach tab shows a **"Follow-ups Due"** card with the eligible companies
+pre-checked; one click sends the `followup_template` to all of them (subject is
+prefixed `Re:` so it threads with the original email in the recipient's inbox).
+Each send is logged back to `outreach`, which is what makes the 2-follow-up cap
+self-enforcing — the count is derived from the log itself.
 
 ---
 
@@ -1410,6 +1442,11 @@ test "$HTTP_STATUS" = "200" -o "$HTTP_STATUS" = "201" -o "$HTTP_STATUS" = "202"
 
 **Q: What would you change if you were scaling this to 100 users?**  
 > First, move from the in-memory `scrape_jobs` dict to MongoDB exclusively — this makes the app stateless and allows multiple Render instances. Second, add a proper job queue (Redis + Celery or BullMQ) instead of the GitHub Actions trigger — lower latency, better error handling, retry logic. Third, add rate limiting on the scrape endpoint so users can't trigger unlimited GitHub Actions jobs. Fourth, move to a paid Render tier for always-on hosting. The database layer and scraping engine wouldn't need changes.
+
+---
+
+**Q: How does the follow-up engine decide who to email?**
+> It derives everything from the outreach log — no extra state to keep in sync. An aggregation groups sent emails by job, taking the latest send date and total count. A company is "due" when its job status is still `contacted` (a reply changes the status, which removes it), the last email is older than the threshold, and fewer than 2 follow-ups have gone out. Because each follow-up is logged to the same collection, the cap enforces itself: the third send makes the count exceed the limit and the company drops out of the queue. The subject line is prefixed "Re:" so Gmail threads it under the original email — recipients see it as a continuation, not a new cold email.
 
 ---
 
