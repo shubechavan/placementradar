@@ -13,8 +13,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt gunicorn
 
-# Copy app source
-COPY . .
+# Copy only what the app needs at runtime.
+# Explicit paths (not `COPY . .`) keep .env, .git, docs, and other host
+# files out of the image. Secrets are injected via env vars at runtime.
+COPY *.py ./
+COPY templates/ ./templates/
+COPY hr_database.csv ./
 
 # Non-root user (security best practice)
 RUN adduser --disabled-password --no-create-home appuser \

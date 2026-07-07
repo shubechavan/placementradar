@@ -33,6 +33,7 @@ def send_outreach_email(to_email, subject, body, settings):
         msg.attach(MIMEText(html_body, 'html'))
 
         ctx = ssl.create_default_context()
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_2   # reject legacy TLS 1.0/1.1
         with smtplib.SMTP_SSL('smtp.gmail.com', 465, context=ctx) as server:
             server.login(gmail_user, gmail_pass)
             server.sendmail(gmail_user, to_email, msg.as_string())
@@ -113,6 +114,7 @@ def test_smtp(settings):
         return {'success':False,'error':'No credentials set'}
     try:
         ctx = ssl.create_default_context()
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_2   # reject legacy TLS 1.0/1.1
         with smtplib.SMTP_SSL('smtp.gmail.com', 465, context=ctx) as s:
             s.login(gmail_user, gmail_pass)
         return {'success':True,'message':f'Connected as {gmail_user}'}
