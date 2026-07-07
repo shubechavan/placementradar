@@ -17,6 +17,25 @@ from database import (init_db, get_settings, save_settings, save_search,
 app = Flask(__name__)
 init_db()
 
+# ── Auth ──────────────────────────────────────────────────────────────────────
+# When APP_API_KEY is set (production), every /api route requires the
+# X-API-Key header. /api/dashboard stays open — it is the deploy health check
+# and keepalive ping target, and exposes only aggregate counts.
+APP_API_KEY = os.environ.get('APP_API_KEY', '')
+if not APP_API_KEY:
+    print('[WARN] APP_API_KEY not set — API is UNAUTHENTICATED (dev mode only)')
+
+@app.before_request
+def _require_api_key():
+    if not APP_API_KEY:
+        return                                    # dev mode — auth disabled
+    if not request.path.startswith('/api'):
+        return                                    # the SPA page itself
+    if request.path == '/api/dashboard':
+        return                                    # health check / keepalive
+    if request.headers.get('X-API-Key') != APP_API_KEY:
+        return jsonify({'error': 'unauthorized'}), 401
+
 # In-memory tracker — used as fallback when GITHUB_PAT not set (local dev)
 scrape_jobs = {}
 
@@ -67,20 +86,24 @@ def dashboard():
     return jsonify(get_dashboard_stats())
 
 # ── Settings ───────────────────────────────────────────────────────────────────
+SECRET_SETTINGS = ('gmail_app_password', 'serper_api_key')
+
 @app.route('/api/settings', methods=['GET'])
 def api_get_settings():
     s = get_settings()
-    # Mask passwords
-    if s.get('gmail_app_password'):
-        s['gmail_app_password'] = '••••••••'
+    # Mask every secret, not just the Gmail password
+    for key in SECRET_SETTINGS:
+        if s.get(key):
+            s[key] = '••••••••'
     return jsonify(s)
 
 @app.route('/api/settings', methods=['POST'])
 def api_save_settings():
     data = request.json or {}
-    # Don't overwrite masked password
-    if data.get('gmail_app_password') == '••••••••':
-        data.pop('gmail_app_password')
+    # Don't overwrite secrets with their masked placeholder
+    for key in SECRET_SETTINGS:
+        if data.get(key) == '••••••••':
+            data.pop(key)
     save_settings(data)
     return jsonify({'success': True})
 
@@ -293,6 +316,9 @@ def get_results(job_id):
 
 @app.route('/api/debug/<job_id>')
 def debug_job(job_id):
+    # Tracebacks leak file paths and internals — never serve them in production
+    if APP_API_KEY and os.environ.get('FLASK_ENV') != 'development':
+        return jsonify({'error': 'Not found'}), 404
     j = scrape_jobs.get(job_id)
     if not j: return jsonify({'error':'Not found'}), 404
     return jsonify({
@@ -312,6 +338,11 @@ def api_get_custom_sites():
 @app.route('/api/custom-sites', methods=['POST'])
 def api_save_custom_site():
     site = request.json or {}
+    for url_field in ('base_url', 'search_url'):
+        u = (site.get(url_field) or '').strip()
+        if u and not _is_safe_url(u):
+            return jsonify({'success': False,
+                            'error': f'{url_field} must be a public http(s) URL'}), 400
     sid  = save_custom_site(site)
     return jsonify({'success': True, 'id': sid})
 
@@ -326,6 +357,19 @@ def api_toggle_custom_site(site_id):
     toggle_custom_site(site_id, enabled)
     return jsonify({'success': True})
 
+def _is_safe_url(url):
+    """Block SSRF — only allow public http(s) hosts, never private/loopback IPs."""
+    from urllib.parse import urlparse
+    import ipaddress, socket
+    try:
+        p = urlparse(url)
+        if p.scheme not in ('http', 'https') or not p.hostname:
+            return False
+        ip = ipaddress.ip_address(socket.gethostbyname(p.hostname))
+        return not (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved)
+    except Exception:
+        return False
+
 @app.route('/api/custom-sites/test', methods=['POST'])
 def api_test_custom_site():
     """Test a custom site config by scraping 3 jobs and returning them."""
@@ -333,6 +377,11 @@ def api_test_custom_site():
     cfg   = request.json or {}
     query = cfg.pop('test_query', 'software engineer')
     loc   = cfg.pop('test_location', 'India')
+    for url_field in ('base_url', 'search_url'):
+        u = (cfg.get(url_field) or '').strip()
+        if u and not _is_safe_url(u):
+            return jsonify({'success': False,
+                            'error': f'{url_field} must be a public http(s) URL'})
     try:
         jobs = scrape_custom_site(cfg, query, loc, count=5)
         return jsonify({'success': True, 'count': len(jobs),

@@ -718,6 +718,23 @@ textarea:focus{border-color:var(--gold);}
 <div id="toast"></div>
 
 <script>
+// ── Auth: attach X-API-Key to every API call; prompt once on 401 ──────────────
+(function(){
+  const _fetch=window.fetch.bind(window);
+  window.fetch=async function(url,opts={}){
+    opts.headers=Object.assign({},opts.headers||{},{'X-API-Key':localStorage.getItem('pr_key')||''});
+    let r=await _fetch(url,opts);
+    if(r.status===401){
+      const k=prompt('This app is protected. Enter the access key:');
+      if(k){localStorage.setItem('pr_key',k);opts.headers['X-API-Key']=k;r=await _fetch(url,opts);}
+    }
+    return r;
+  };
+})();
+// Only allow http(s) URLs — blocks javascript: URLs from scraped job data
+function safeUrl(u){u=String(u||'').trim();return /^https?:\/\//i.test(u)?u:'';}
+// Safe single-char fallback for the company logo tile (used inside onerror JS)
+function fbChar(co){const m=String(co||'').match(/[a-zA-Z0-9]/);return m?m[0].toUpperCase():'?';}
 let searchResults=[],filteredS=[],boardResults=[],filteredB=[];
 let currentJobId=null,pollT=null;
 let sPage=1,bPage=1;
@@ -761,7 +778,7 @@ async function loadDashboard(){
   const fn=[{l:'Total Jobs',c:tot,col:'#e8a020'},{l:'Has Email',c:d.with_email||0,col:'#3b82f6'},{l:'Contacted',c:d.contacted||0,col:'#8b5cf6'},{l:'Replied',c:d.replied||0,col:'#1db954'},{l:'Drive Sched.',c:d.drive_scheduled||0,col:'#ec407a'}];
   document.getElementById('funnel').innerHTML=fn.map(f=>`<div class="fr-row"><span class="fr-lbl">${f.l}</span><div class="fr-bar"><div class="fr-fill" style="width:${tot>0?Math.round(f.c/tot*100):0}%;background:${f.col}"></div></div><span class="fr-cnt" style="color:${f.col}">${f.c}</span></div>`).join('');
   const rs=d.recent_searches||[];
-  document.getElementById('recent-s').innerHTML=rs.length?rs.map(s=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:var(--card2);border-radius:7px;margin-bottom:5px;cursor:pointer" onclick="rerun('${esc(s.search_term)}','${esc(s.location)}')"><div><div style="font-size:12px;font-weight:500">${esc(s.search_term)} · ${esc(s.location)}</div><div style="font-size:10px;color:var(--dim);font-family:'JetBrains Mono',monospace">${s.job_count} jobs · ${(s.created_at||'').substring(0,10)}</div></div><span style="color:var(--gold);font-size:11px">▶</span></div>`).join(''):'<div class="empty" style="padding:16px">No searches yet</div>';
+  document.getElementById('recent-s').innerHTML=rs.length?rs.map(s=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:var(--card2);border-radius:7px;margin-bottom:5px;cursor:pointer" data-term="${esc(s.search_term||'')}" data-loc="${esc(s.location||'')}" onclick="rerun(this.dataset.term,this.dataset.loc)"><div><div style="font-size:12px;font-weight:500">${esc(s.search_term)} · ${esc(s.location)}</div><div style="font-size:10px;color:var(--dim);font-family:'JetBrains Mono',monospace">${s.job_count} jobs · ${(s.created_at||'').substring(0,10)}</div></div><span style="color:var(--gold);font-size:11px">▶</span></div>`).join(''):'<div class="empty" style="padding:16px">No searches yet</div>';
   const tc=d.top_companies||[];
   document.getElementById('top-co').innerHTML=tc.map(c=>`<div style="display:flex;align-items:center;gap:7px;padding:7px 0;border-bottom:1px solid var(--bdr)"><img class="co-logo" src="https://logo.clearbit.com/${guessDom('',c.company)}" onerror="this.style.display='none'"><span style="flex:1;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c.company)}</span><span style="font-size:11px;color:var(--gold);font-family:'JetBrains Mono',monospace">${c.count}</span></div>`).join('');
 }
@@ -831,21 +848,22 @@ function renderSTable(){
   tbody.innerHTML=page.map((r,i)=>{
     const k=r.job_url||r.title+r.company;const dom=guessDom(r.company_url,r.company);
     return `<tr style="animation-delay:${i*14}ms">
-      <td><input type="checkbox" ${sel.has(k)?'checked':''} onchange="togRow(this,'${esc(k)}')" style="accent-color:var(--gold)"></td>
+      <td><input type="checkbox" ${sel.has(k)?'checked':''} onchange="togRowIdx(this,${start+i})" style="accent-color:var(--gold)"></td>
       <td style="font-weight:500" title="${esc(r.title)}">${esc(r.title||'—')}</td>
-      <td><div class="co-row"><img class="co-logo" src="https://logo.clearbit.com/${dom}" onerror="this.outerHTML='<div class=\\'co-fb\\'>${esc((r.company||'?')[0])}</div>'"><span title="${esc(r.company)}">${esc(r.company||'—')}</span></div></td>
+      <td><div class="co-row"><img class="co-logo" src="https://logo.clearbit.com/${esc(dom)}" onerror="this.outerHTML='<div class=\\'co-fb\\'>${fbChar(r.company)}</div>'"><span title="${esc(r.company)}">${esc(r.company||'—')}</span></div></td>
       <td style="font-size:11px" title="${esc(r.location)}">${esc(r.location||'—')}${r.location_priority?`<div class="ploc-pill ploc-${r.location_priority[1]}" style="margin-top:3px">${esc(r.location_priority)}</div>`:''}</td>
       <td>${r.job_type?`<span class="bdg">${esc(r.job_type)}</span>`:'—'}</td>
       <td><span class="bdg bdg-${(r.site||'').replace('_','')}">${esc(r.site||'—')}</span></td>
       <td class="ec wrap" style="max-width:190px">${r.emails?r.emails.split(', ').slice(0,2).map(e=>`<div>${esc(e)}${e===r.hr_contact?' ★':''}</div>`).join(''):'<span style="color:var(--dim)">—</span>'}${r.email_source?`<div class="stag" style="${srcStyle(r.email_source)}">${esc(r.email_source)}</div>`:''}</td>
       <td class="pc">${r.phone&&r.phone!=='—'?fmtPhone(r.phone):'<span style="color:var(--dim)">—</span>'}</td>
-      <td><span class="pill ${scls(r.status||'new')}" onclick="cycleS(this,'${esc(k)}','${r.status||'new'}')">${slbl(r.status||'new')}</span></td>
-      <td class="lc">${r.phone&&r.phone!=='—'?`<a href="tel:${r.phone.split(', ')[0].replace(/\s/g,'')}" style="color:var(--green);font-weight:600" title="Call ${esc(r.company)}">📞</a> `:''}${r.job_url?`<a href="${esc(r.job_url)}" target="_blank">↗</a>`:'—'}</td>
+      <td><span class="pill ${scls(r.status||'new')}" onclick="cycleSIdx(this,${start+i})">${slbl(r.status||'new')}</span></td>
+      <td class="lc">${r.phone&&r.phone!=='—'?`<a href="tel:${esc(r.phone.split(', ')[0].replace(/[^\d+]/g,''))}" style="color:var(--green);font-weight:600" title="Call ${esc(r.company)}">📞</a> `:''}${safeUrl(r.job_url)?`<a href="${esc(safeUrl(r.job_url))}" target="_blank" rel="noopener noreferrer">↗</a>`:'—'}</td>
     </tr>`;
   }).join('');
   renderPgn('s',filteredS.length,sPage,p=>{sPage=p;renderSTable();});
 }
 function togRow(cb,k){if(cb.checked)sel.add(k);else sel.delete(k);}
+function togRowIdx(cb,idx){const r=filteredS[idx];if(!r)return;togRow(cb,r.job_url||r.title+r.company);}
 function selectAllS(){filteredS.forEach(r=>sel.add(r.job_url||r.title+r.company));renderSTable();}
 function toggleSelAll(cb){if(cb.checked)selectAllS();else{sel.clear();renderSTable();}}
 
@@ -952,7 +970,7 @@ function renderBTable(){
       const emailAddr=r.hr_contact||(r.emails?(r.emails.split(',')[0]||'').trim():'');
       const{g,cls}=contactGrade(r);
       return `<tr style="animation-delay:${i*12}ms">
-        <td><div class="co-row"><img class="co-logo" src="https://logo.clearbit.com/${dom}" onerror="this.outerHTML='<div class=co-fb>${esc((r.company||'?')[0])}</div>'"><span title="${esc(r.company)}">${esc(r.company||'—')}</span></div></td>
+        <td><div class="co-row"><img class="co-logo" src="https://logo.clearbit.com/${esc(dom)}" onerror="this.outerHTML='<div class=co-fb>${fbChar(r.company)}</div>'"><span title="${esc(r.company)}">${esc(r.company||'—')}</span></div></td>
         <td style="font-weight:500;max-width:160px" title="${esc(r.title)}"><span class="grade ${cls}" title="Contact grade: ${g}">${g}</span>${esc(r.title||'—')}</td>
         <td style="color:var(--sub);font-size:11px">${esc(r.location||'—')}</td>
         <td><span class="bdg bdg-${(r.site||'').replace('_','')}">${esc(r.site||'—')}</span></td>
@@ -960,7 +978,7 @@ function renderBTable(){
         <td class="pc">${(r.phone&&r.phone!=='—')?fmtPhone(r.phone):'<span style="color:var(--dim)">—</span>'}</td>
         <td><select class="fs" style="font-size:11px;padding:3px 6px" onchange="updStatus('${r.id}',this.value)">${['new','contacted','replied','drive_scheduled','rejected','not_interested'].map(s=>`<option value="${s}" ${r.status===s?'selected':''}>${slbl(s)}</option>`).join('')}</select></td>
         <td><select class="fs" style="font-size:11px;padding:3px 6px" onchange="updScore('${r.id}',this.value)"><option value="0" ${!r.score?'selected':''}>—</option>${[1,2,3,4,5].map(n=>`<option value="${n}" ${r.score===n?'selected':''}>${'★'.repeat(n)}</option>`).join('')}</select></td>
-        <td><div style="display:flex;gap:4px">${phoneHref?`<a href="tel:${phoneHref}" class="btn btn-ghost btn-sm" style="padding:3px 8px;font-size:10px;color:var(--green);border-color:var(--green);text-decoration:none">Call</a>`:''} ${emailAddr?`<button class="btn btn-blue btn-sm" style="padding:3px 8px;font-size:10px" onclick="qEmail('${r.id}','${esc(r.company)}','${esc(emailAddr)}','${esc(r.title)}')">Email</button>`:''} ${r.job_url?`<button class="btn btn-ghost btn-sm" style="padding:3px 8px;font-size:10px" onclick="window.open('${esc(r.job_url)}','_blank')">View</button>`:''}</div></td>
+        <td><div style="display:flex;gap:4px">${phoneHref?`<a href="tel:${esc(phoneHref.replace(/[^\d+]/g,''))}" class="btn btn-ghost btn-sm" style="padding:3px 8px;font-size:10px;color:var(--green);border-color:var(--green);text-decoration:none">Call</a>`:''} ${emailAddr?`<button class="btn btn-blue btn-sm" style="padding:3px 8px;font-size:10px" onclick="qEmailIdx(${(bPage-1)*PG+i})">Email</button>`:''} ${safeUrl(r.job_url)?`<button class="btn btn-ghost btn-sm" style="padding:3px 8px;font-size:10px" onclick="viewJobIdx(${(bPage-1)*PG+i})">View</button>`:''}</div></td>
       </tr>`;
     }).join('');
     renderPgn('b',filteredB.length,bPage,p=>{bPage=p;renderBTable();});
@@ -1025,6 +1043,8 @@ async function bulkSend(){
   if(sent)toast(`Sent to ${sent} companies`,'success');if(fail)toast(`${fail} failed — check Gmail settings`,'error');
   loadOutreach();loadDashboard();
 }
+function qEmailIdx(idx){const r=filteredB[idx];if(!r)return;const em=r.hr_contact||(r.emails?(r.emails.split(',')[0]||'').trim():'');qEmail(r.id,r.company||'',em,r.title||'');}
+function viewJobIdx(idx){const r=filteredB[idx];if(!r)return;const u=safeUrl(r.job_url);if(u)window.open(u,'_blank','noopener');}
 async function qEmail(id,company,email,title){
   const s=await fetch('/api/settings').then(r=>r.json()).catch(()=>({}));
   const tpl=(s.outreach_template||'').replace(/\{\{company\}\}/g,company).replace(/\{\{college_name\}\}/g,s.college_name||'KJSIM').replace(/\{\{committee_name\}\}/g,s.committee_name||'').replace(/\{\{committee_email\}\}/g,s.committee_email||'');
@@ -1175,7 +1195,7 @@ function renderCustomSites() {
     el.innerHTML = '<div style="color:var(--dim);text-align:center;padding:40px">No custom sites yet — click "+ Add Site" to get started</div>';
     return;
   }
-  el.innerHTML = customSites.map(s => `
+  el.innerHTML = customSites.map((s,i) => `
     <div style="display:flex;align-items:center;gap:12px;padding:14px;border:1px solid var(--brd);border-radius:8px;margin-bottom:8px;background:rgba(255,255,255,.02)">
       <div style="flex:1;min-width:0">
         <div style="font-weight:600;font-size:13px">${esc(s.name)}</div>
@@ -1190,7 +1210,7 @@ function renderCustomSites() {
           <span style="color:var(--sub)">${s.enabled!==false?'On':'Off'}</span>
         </label>
         <button class="btn btn-ghost btn-sm" onclick="editCustomSite('${s.id}')">Edit</button>
-        <button class="btn btn-sm" style="background:rgba(239,68,68,.12);color:#f87171;border:1px solid rgba(239,68,68,.2)" onclick="deleteCustomSite('${s.id}','${esc(s.name)}')">✕</button>
+        <button class="btn btn-sm" style="background:rgba(239,68,68,.12);color:#f87171;border:1px solid rgba(239,68,68,.2)" onclick="deleteCustomIdx(${i})">✕</button>
       </div>
     </div>
   `).join('');
@@ -1285,6 +1305,7 @@ async function testCustomSite() {
   }
 }
 
+function deleteCustomIdx(i){const s=customSites[i];if(s)deleteCustomSite(s.id,s.name);}
 async function deleteCustomSite(id, name) {
   if (!confirm(`Remove "${name}" from custom sites?`)) return;
   await fetch(`/api/custom-sites/${id}`, {method:'DELETE'});
@@ -1319,7 +1340,7 @@ async function testGmail(){
 
 const SCYCLE=['new','contacted','replied','drive_scheduled','rejected'];
 function scls(s){return{new:'sn',contacted:'sc3',replied:'sr',drive_scheduled:'sd',rejected:'sx',not_interested:'si'}[s]||'sn';}
-function cycleS(el,key,cur){const nx=SCYCLE[(SCYCLE.indexOf(cur)+1)%SCYCLE.length];el.className=`pill ${scls(nx)}`;el.textContent=slbl(nx);el.setAttribute('onclick',`cycleS(this,'${key}','${nx}')`);const j=searchResults.find(r=>(r.job_url||r.title+r.company)===key);if(j)j.status=nx;}
+function cycleSIdx(el,idx){const r=filteredS[idx];if(!r)return;const cur=r.status||'new';const nx=SCYCLE[(SCYCLE.indexOf(cur)+1)%SCYCLE.length];el.className=`pill ${scls(nx)}`;el.textContent=slbl(nx);r.status=nx;}
 function slbl(s){return{new:'New',contacted:'Contacted',replied:'Replied',drive_scheduled:'Drive Sched.',rejected:'Rejected',not_interested:'Not Interested'}[s]||s;}
 
 function exportSearch(){if(!currentJobId){toast('No search results','error');return;}window.location.href=`/api/export?source=scrape&job_id=${currentJobId}`;}
@@ -1336,7 +1357,7 @@ function renderPgn(pfx,total,cur,fn){
 function setProg(p,m){const pct=Number.isFinite(+p)?+p:0;document.getElementById('prog-fill').style.width=pct+'%';document.getElementById('prog-msg').textContent=m||'Running...';document.getElementById('prog-pct').textContent=pct+'%';}
 function setBtnLoad(on){const b=document.getElementById('start-btn');b.disabled=on;document.getElementById('btn-icon').innerHTML=on?'<span class="spin">⟳</span>':'▶';document.getElementById('btn-txt').textContent=on?'Scraping...':'Start Scraping';}
 function guessDom(url,co){if(url){try{const h=new URL(url.startsWith('http')?url:'https://'+url).hostname;return h.replace(/^www\./,'');}catch(e){}}if(!co)return'';const n=co.toLowerCase().replace(/\s+(pvt|ltd|limited|inc|llc|corp|private|technologies|tech|solutions|services|india|group)\.?\s*$/i,'').replace(/[^a-z0-9]/g,'');return n?n+'.com':'';}
-function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
 function fmtPhone(ph){if(!ph||ph==='—')return'<span style="color:var(--dim)">—</span>';const nums=ph.split(', ').filter(Boolean);const links=nums.slice(0,2).map(n=>`<a href="tel:${n.replace(/\s/g,'')}" style="display:block;color:var(--green);font-weight:600;text-decoration:none;white-space:nowrap" title="Click to call">${esc(n)}</a>`).join('');return `<div>${links}</div>`;}
 function srcStyle(src){
   if(!src)return'';

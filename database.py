@@ -27,10 +27,14 @@ def _sanitize_doc(obj):
     return obj
 
 # ── Connection ────────────────────────────────────────────────────────────────
-MONGO_URI = os.environ.get(
-    'MONGO_URI',
-    'mongodb+srv://shubhamchavancool332:0QKHGwWML4OVeCLH@cluster0.p96yv.mongodb.net/jobs'
-)
+# No hardcoded fallback — credentials must come from the environment.
+MONGO_URI = os.environ.get('MONGO_URI', '')
+if not MONGO_URI:
+    raise RuntimeError(
+        'MONGO_URI environment variable is not set. '
+        'Set it in .env (local), Render dashboard (production), '
+        'or GitHub Secrets (Actions worker).'
+    )
 
 _client = None
 _db     = None
@@ -88,7 +92,7 @@ def init_db():
         'scheduler_enabled':  'false',
         'scheduler_time':     '09:00',
         'scheduler_email':    '',
-        'serper_api_key':    '33498ec8dab4b90aa71fcccb22e39fe13e3dc844',
+        'serper_api_key':    os.environ.get('SERPER_API_KEY', ''),
         'outreach_template': (
             'Dear HR Team,\n\nI am writing from the Placement Committee of {{college_name}}. '
             'We have highly qualified final-year students graduating in 2025 across Engineering, '
@@ -132,7 +136,14 @@ def init_db():
 def get_settings():
     db   = _get_db()
     rows = db.settings.find({}, {'_id': 0})
-    return {r['key']: r['value'] for r in rows}
+    out  = {r['key']: r['value'] for r in rows}
+    # Env vars take precedence over DB-stored secrets so credentials can be
+    # kept out of the database entirely in production.
+    for env_key, setting_key in (('GMAIL_APP_PASSWORD', 'gmail_app_password'),
+                                 ('SERPER_API_KEY',     'serper_api_key')):
+        if os.environ.get(env_key):
+            out[setting_key] = os.environ[env_key]
+    return out
 
 
 def save_settings(data: dict):
@@ -251,7 +262,8 @@ def get_all_jobs(filters=None):
         if filters.get('has_email'):
             query['emails'] = {'$nin': ['', 'nan', None]}
         if filters.get('search'):
-            s = filters['search']
+            # re.escape — raw user input in $regex allows ReDoS / filter injection
+            s = re.escape(filters['search'])
             query['$or'] = [
                 {'title':    {'$regex': s, '$options': 'i'}},
                 {'company':  {'$regex': s, '$options': 'i'}},
