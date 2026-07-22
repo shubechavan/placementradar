@@ -178,6 +178,9 @@ td.wrap { white-space:normal; }
 .grade-C{background:rgba(255,215,0,.15);color:#ffd700;border:1px solid rgba(255,215,0,.35);}
 .grade-D{background:rgba(255,140,0,.15);color:#ff8c00;border:1px solid rgba(255,140,0,.35);}
 .grade-F{background:rgba(255,68,68,.15);color:#ff5555;border:1px solid rgba(255,68,68,.35);}
+.dtc{white-space:nowrap;font-family:'JetBrains Mono',monospace;}
+.dt-d{font-size:11px;color:var(--sub);font-weight:500;}
+.dt-t{font-size:10px;color:var(--dim);margin-top:1px;}
 .cbar{display:flex;align-items:center;gap:10px;background:rgba(29,185,84,.05);border:1px solid rgba(29,185,84,.18);border-radius:8px;padding:8px 14px;margin-bottom:12px;flex-wrap:wrap;}
 .cbar-stat{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;color:var(--green);}
 .cbar-stat em{font-style:normal;font-weight:400;color:var(--sub);margin-left:3px;}
@@ -497,7 +500,7 @@ textarea:focus{border-color:var(--gold);}
       </div>
       <div class="tw">
         <table>
-          <thead><tr><th>Company</th><th>Job Title</th><th>Location</th><th>Source</th><th>Email / HR</th><th>Phone</th><th>Status</th><th>Score</th><th>Actions</th></tr></thead>
+          <thead><tr><th>Company</th><th>Job Title</th><th>Location</th><th>Source</th><th>Email / HR</th><th>Phone</th><th>Status</th><th>Score</th><th>Added</th><th>Actions</th></tr></thead>
           <tbody id="b-tbody"></tbody>
         </table>
         <div class="pgn" id="b-pgn"></div>
@@ -748,6 +751,19 @@ textarea:focus{border-color:var(--gold);}
 })();
 // Only allow http(s) URLs — blocks javascript: URLs from scraped job data
 function safeUrl(u){u=String(u||'').trim();return /^https?:\/\//i.test(u)?u:'';}
+// Render an ISO timestamp as date + time. Output is built from parsed Date
+// components only — the raw string never reaches innerHTML.
+function fmtDT(iso){
+  const dash='<span style="color:var(--dim)">—</span>';
+  if(!iso)return dash;
+  const d=new Date(iso);
+  if(isNaN(d.getTime()))return dash;
+  const day=d.toLocaleDateString('en-IN',{day:'2-digit',month:'short'});
+  const tm=d.toLocaleTimeString('en-IN',{hour:'numeric',minute:'2-digit',hour12:true});
+  const rel=Math.floor((Date.now()-d.getTime())/864e5);
+  const ago=rel<=0?'today':rel===1?'yesterday':`${rel}d ago`;
+  return `<div class="dt-d" title="${ago}">${day}</div><div class="dt-t">${tm}</div>`;
+}
 // Safe single-char fallback for the company logo tile (used inside onerror JS)
 function fbChar(co){const m=String(co||'').match(/[a-zA-Z0-9]/);return m?m[0].toUpperCase():'?';}
 let searchResults=[],filteredS=[],boardResults=[],filteredB=[];
@@ -904,7 +920,7 @@ async function loadBoard(){
   }catch(err){
     console.error('[loadBoard]',err);
     const tbody=document.getElementById('b-tbody');
-    if(tbody)tbody.innerHTML='<tr><td colspan="9" style="color:red;padding:20px;text-align:center">Error loading jobs: '+String(err)+'</td></tr>';
+    if(tbody)tbody.innerHTML='<tr><td colspan="10" style="color:red;padding:20px;text-align:center">Error loading jobs: '+String(err)+'</td></tr>';
     const cnt=document.getElementById('b-count');if(cnt)cnt.textContent='Error';
   }
 }
@@ -978,7 +994,7 @@ function renderBTable(){
   try{
     const cnt=document.getElementById('b-count');if(cnt)cnt.textContent=`${filteredB.length} of ${boardResults.length} jobs`;
     const tbody=document.getElementById('b-tbody');const page=filteredB.slice((bPage-1)*PG,(bPage-1)*PG+PG);
-    if(!page.length){tbody.innerHTML='<tr><td colspan="9" class="empty"><div class="empty-icon">◌</div>No jobs match the current filters</td></tr>';document.getElementById('b-pgn').innerHTML='';return;}
+    if(!page.length){tbody.innerHTML='<tr><td colspan="10" class="empty"><div class="empty-icon">◌</div>No jobs match the current filters</td></tr>';document.getElementById('b-pgn').innerHTML='';return;}
     tbody.innerHTML=page.map((r,i)=>{
       const dom=guessDom(r.company_url,r.company);
       const phoneHref=(r.phone&&r.phone!=='—')?r.phone.split(', ')[0].replace(/\s/g,''):'';
@@ -993,6 +1009,7 @@ function renderBTable(){
         <td class="pc">${(r.phone&&r.phone!=='—')?fmtPhone(r.phone):'<span style="color:var(--dim)">—</span>'}</td>
         <td><select class="fs" style="font-size:11px;padding:3px 6px" onchange="updStatus('${r.id}',this.value)">${['new','contacted','replied','drive_scheduled','rejected','not_interested'].map(s=>`<option value="${s}" ${r.status===s?'selected':''}>${slbl(s)}</option>`).join('')}</select></td>
         <td><select class="fs" style="font-size:11px;padding:3px 6px" onchange="updScore('${r.id}',this.value)"><option value="0" ${!r.score?'selected':''}>—</option>${[1,2,3,4,5].map(n=>`<option value="${n}" ${r.score===n?'selected':''}>${'★'.repeat(n)}</option>`).join('')}</select></td>
+        <td class="dtc">${fmtDT(r.created_at)}</td>
         <td><div style="display:flex;gap:4px">${phoneHref?`<a href="tel:${esc(phoneHref.replace(/[^\d+]/g,''))}" class="btn btn-ghost btn-sm" style="padding:3px 8px;font-size:10px;color:var(--green);border-color:var(--green);text-decoration:none">Call</a>`:''} ${emailAddr?`<button class="btn btn-blue btn-sm" style="padding:3px 8px;font-size:10px" onclick="qEmailIdx(${(bPage-1)*PG+i})">Email</button>`:''} ${safeUrl(r.job_url)?`<button class="btn btn-ghost btn-sm" style="padding:3px 8px;font-size:10px" onclick="viewJobIdx(${(bPage-1)*PG+i})">View</button>`:''}</div></td>
       </tr>`;
     }).join('');
@@ -1000,7 +1017,7 @@ function renderBTable(){
   }catch(err){
     console.error('[renderBTable]',err);
     const tbody=document.getElementById('b-tbody');
-    if(tbody)tbody.innerHTML='<tr><td colspan="9" style="color:red;padding:20px;text-align:center">Render error: '+String(err)+'</td></tr>';
+    if(tbody)tbody.innerHTML='<tr><td colspan="10" style="color:red;padding:20px;text-align:center">Render error: '+String(err)+'</td></tr>';
   }
 }
 async function updStatus(id,st){await fetch(`/api/jobs/${id}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:st})});const j=boardResults.find(x=>x.id===id);if(j)j.status=st;}
