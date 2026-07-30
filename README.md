@@ -1,97 +1,124 @@
-# 📡 PlacementRadar — Job Intelligence Tool
+# 📡 PlacementRadar
 
-A web-based job scraping tool built for placement committees.
-Scrapes jobs from **LinkedIn, Indeed, Glassdoor, ZipRecruiter, Internshala, Naukri, Shine, Foundit, Apna**
-and attempts to enrich each listing with **HR emails & phone numbers**.
+A full-stack job-intelligence and outreach tool for college placement cells.
+It scrapes jobs across 25+ boards, auto-discovers HR **phone numbers and emails**
+from 8 parallel sources, and sends (and follows up on) outreach emails — all from
+one dashboard.
+
+**Live:** https://placementradar.onrender.com
+**Full technical docs:** see [DOCUMENTATION.md](DOCUMENTATION.md)
 
 ---
 
-## ⚡ Quick Setup (5 minutes)
+## What it does
 
-### 1. Install Python 3.10+ (if not already installed)
-Download from https://python.org
+1. **Scrape** — pulls jobs from Naukri, Internshala, LinkedIn, Indeed, Google Jobs,
+   and 20+ other boards (plus user-defined custom sites).
+2. **Enrich** — for each company, 8 sources run in parallel to find contact details:
+   company website + deep crawl, Zauba Corp, JustDial, IndiaMART, Sulekha,
+   TradeIndia, and Google (Serper). Phones are validated with Google's
+   libphonenumber; emails with an RFC validator.
+3. **Act** — bulk-copy all phones/emails, grade each lead A–F by contact quality,
+   send templated outreach over Gmail, and auto-queue no-reply companies for
+   follow-ups.
 
-### 2. Install dependencies
+Heavy scraping runs on **GitHub Actions** (2 CPU / 7 GB, free) so the web app stays
+lightweight; **MongoDB Atlas** is the shared store and message bus. Total infra
+cost: **$0/month**.
+
+---
+
+## Quick start (local)
+
+**1. Requirements:** Python 3.10+
+
+**2. Install:**
 ```bash
 pip install -r requirements.txt
 ```
 
-### 3. Run the tool
+**3. Configure** — copy `.env.example` to `.env` and set at least `MONGO_URI`
+(a free MongoDB Atlas M0 cluster works). The app refuses to start without it.
+```bash
+cp .env.example .env
+# then edit .env
+```
+
+**4. Run:**
 ```bash
 python app.py
 ```
 
-### 4. Open your browser
-Go to → **http://localhost:5000**
+**5. Open** → http://localhost:5000
 
 ---
 
-## 🔧 How to Use
+## Environment variables
 
-1. Enter the **job role** (e.g. "Software Engineer", "Data Analyst", "MBA Finance")
-2. Enter **location** (e.g. "Bangalore", "Mumbai", "India")
-3. Select **job sites** to scrape
-4. Toggle **auto-fetch emails & phones** ON for contact enrichment
-5. Click **Start Scraping**
-6. Wait for results — use **filters** to narrow down
-7. Click **Export CSV** to download
+| Variable | Required | Purpose |
+|----------|----------|---------|
+| `MONGO_URI` | **Yes** | MongoDB Atlas connection string. App won't boot without it. |
+| `APP_API_KEY` | Recommended | When set, all `/api` routes (except `/api/dashboard`) require an `X-API-Key` header. Unset = open (local dev only). |
+| `SERPER_API_KEY` | Optional | Google Serper key for the search-based enrichment source. Can also be set in the Settings UI. |
+| `GMAIL_APP_PASSWORD` | Optional | Gmail App Password for outreach; overrides the value in Settings so the secret stays out of the DB. |
+| `GH_PAT` | Optional | GitHub PAT (workflow scope) — enables offloading scrapes to GitHub Actions. Without it, scraping runs in a local thread. |
 
----
-
-## 📊 CSV Output Columns
-
-| Column       | Description                              |
-|--------------|------------------------------------------|
-| title        | Job role/title                           |
-| company      | Company name                             |
-| location     | Job location                             |
-| job_type     | Full-time / Internship / Contract        |
-| salary       | Salary range (if available)              |
-| site         | Source site (linkedin, naukri, etc.)     |
-| date_posted  | When the job was posted                  |
-| emails       | All emails found (comma-separated)       |
-| hr_contact   | Best HR/recruiter email (highlighted)    |
-| phone        | Phone numbers found                      |
-| job_url      | Direct link to job posting               |
-| company_url  | Company website URL                      |
-| description  | First 600 chars of job description       |
+Secrets are **never** hardcoded — all come from the environment. Never commit `.env`.
 
 ---
 
-## ⚠️ Notes on Phone Numbers
+## How to use
 
-Most job postings **intentionally don't list phone numbers** — companies
-prefer candidates apply through their system. The tool will:
-- Extract phones from job description text (if any)
-- Scrape company "Contact Us" pages
-- Try Google search for HR contact pages
-
-For phone numbers, **Naukri** and **Internshala** have the most because
-Indian recruiters often post them.
-
----
-
-## 🛡️ Anti-Bot / Rate Limiting
-
-If you get blocked:
-- Reduce "Max Results" to 20–30
-- Wait a few minutes before re-scraping
-- LinkedIn is most aggressive — use Indeed/Naukri/Internshala first
+1. Enter a **job role** and **location**, pick which **sites** to scrape.
+2. Keep **contact enrichment** on to auto-find phones/emails.
+3. Click **Start Scraping** and watch live progress.
+4. On the **Job Board**: filter, sort, see each lead's **A–F grade** and when it was
+   **Added**, then **Copy All Phones / Emails** or hit **Email**.
+5. On **Outreach**: send templated emails, and use **Follow-ups Due** to nudge
+   companies that never replied (max 2 follow-ups, auto-capped).
+6. **Export CSV** anytime.
 
 ---
 
-## 📁 Project Structure
+## Project structure
 
 ```
 placement_tool/
-├── app.py              ← Flask server (run this)
-├── job_scraper.py      ← JobSpy + Indian site scrapers
-├── contact_finder.py   ← Email/phone extraction
-├── requirements.txt    ← Python dependencies
-├── README.md           ← This file
-└── templates/
-    └── index.html      ← Web UI
+├── app.py                 ← Flask API (21 routes) + GitHub Actions trigger
+├── database.py            ← MongoDB layer (jobs, searches, outreach, settings, contacts)
+├── job_scraper.py         ← Multi-board scraping engine
+├── contact_finder.py      ← 8-source parallel contact enrichment
+├── email_sender.py        ← Gmail SMTP outreach + follow-ups
+├── scrape_worker.py       ← Entry point run by GitHub Actions
+├── hr_database_lookup.py  ← CSV-backed HR contact seed data
+├── hr_database.csv        ← Verified Indian HR contacts
+├── requirements.txt
+├── Dockerfile             ← Container build
+├── render.yaml            ← Render deploy config
+├── .env.example           ← Env var template
+├── templates/
+│   └── index.html         ← Single-page dashboard UI
+└── .github/workflows/     ← deploy.yml (CI/CD), scrape.yml, keepalive.yml
 ```
+
+---
+
+## Deployment
+
+Dockerized and deployed on **Render** (free tier). Every push to `main` triggers
+`deploy.yml`: lint → build image → push to ghcr.io → deploy → health check.
+See [DOCUMENTATION.md](DOCUMENTATION.md) for the full architecture and the
+GitHub-Actions-as-scraper design.
+
+---
+
+## Notes on data
+
+- **Phone numbers:** many postings omit them by design; Naukri and Internshala
+  recruiters list them most often. The 8-source enrichment fills the gaps from
+  business directories and company sites.
+- **Anti-bot:** if you get blocked, lower Max Results to 20–30, wait a few minutes,
+  and prefer Internshala/Naukri/Google Jobs over LinkedIn (most aggressive).
 
 ---
 

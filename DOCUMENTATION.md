@@ -709,6 +709,32 @@ Key behaviour:
 - Falls back to `execCommand('copy')` for older browsers
 - Works in both Search results view and Job Board view
 
+### Date/Time Column ("Added")
+
+Every job row shows when the job entered the database, rendered as a compact
+date-over-time stack (e.g. `08 Apr` / `5:18 pm`) with a relative-time tooltip
+(`today`, `yesterday`, `3d ago`):
+
+```javascript
+function fmtDT(iso){
+  const dash='<span style="color:var(--dim)">—</span>';
+  if(!iso) return dash;
+  const d = new Date(iso);
+  if(isNaN(d.getTime())) return dash;              // malformed → dash, never crashes
+  const day = d.toLocaleDateString('en-IN',{day:'2-digit',month:'short'});
+  const tm  = d.toLocaleTimeString('en-IN',{hour:'numeric',minute:'2-digit',hour12:true});
+  const rel = Math.floor((Date.now()-d.getTime())/864e5);
+  const ago = rel<=0?'today':rel===1?'yesterday':`${rel}d ago`;
+  return `<div class="dt-d" title="${ago}">${day}</div><div class="dt-t">${tm}</div>`;
+}
+```
+
+It binds to `created_at` (when the scraper *found* the job) rather than
+`date_posted`, because `date_posted` is empty on the saved jobs — so the column
+is honestly labelled **"Added"**, not "Posted", to avoid implying data the app
+doesn't have. Empty, null, and unparseable timestamps all fall back to a dash
+instead of rendering `Invalid Date`.
+
 ### Real-Time Progress Polling
 ```javascript
 const poll = setInterval(async () => {
