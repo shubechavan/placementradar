@@ -27,6 +27,91 @@
 }
 *,*::before,*::after { box-sizing:border-box; margin:0; padding:0; }
 html,body { height:100%; overflow:hidden; }
+
+/* Login overlay */
+#login-overlay { position:fixed; inset:0; z-index:1000; background:radial-gradient(1200px 600px at 50% -10%, #0f1a2e 0%, var(--bg) 60%); display:flex; align-items:center; justify-content:center; }
+.login-card { width:340px; max-width:90vw; background:var(--card); border:1px solid var(--bdr2); border-radius:14px; padding:30px 28px; box-shadow:0 24px 60px rgba(0,0,0,.5); }
+.login-logo { font-size:1.35rem; font-weight:800; letter-spacing:-.3px; margin-bottom:4px; }
+.login-logo b { color:var(--gold); font-weight:800; }
+.login-badge { display:inline-block; background:var(--gold); color:#000; font-size:9px; font-weight:800; letter-spacing:1.6px; padding:2px 7px; border-radius:3px; vertical-align:middle; margin-right:6px; }
+.login-sub { font-size:12px; color:var(--sub); margin-bottom:22px; font-family:'JetBrains Mono',monospace; }
+.login-lbl { display:block; font-size:11px; color:var(--sub); margin-bottom:5px; font-weight:600; }
+.login-err { color:#f87171; font-size:12px; margin-top:12px; min-height:16px; text-align:center; }
+
+/* Topbar user chip */
+.user-chip { display:flex; align-items:center; gap:9px; padding-left:6px; border-left:1px solid var(--bdr2); margin-left:2px; }
+.user-avatar { width:28px; height:28px; border-radius:50%; background:var(--gold); color:#000; font-weight:800; font-size:12px; display:flex; align-items:center; justify-content:center; text-transform:uppercase; }
+.user-meta { display:flex; flex-direction:column; line-height:1.15; }
+.user-meta span { font-size:12px; font-weight:600; }
+.user-meta em { font-size:9px; color:var(--dim); font-style:normal; text-transform:uppercase; letter-spacing:.5px; }
+
+/* Log-activity modal */
+.modal-back { position:fixed; inset:0; z-index:900; background:rgba(4,7,13,.72); display:flex; align-items:center; justify-content:center; padding:20px; }
+.modal-card { width:440px; max-width:92vw; max-height:88vh; overflow-y:auto; background:var(--card); border:1px solid var(--bdr2); border-radius:13px; box-shadow:0 24px 60px rgba(0,0,0,.55); }
+.modal-head { display:flex; align-items:flex-start; justify-content:space-between; padding:18px 20px 12px; border-bottom:1px solid var(--bdr); }
+.modal-title { font-size:1.05rem; font-weight:700; }
+.modal-sub { font-size:12px; color:var(--gold); margin-top:2px; font-weight:600; }
+.modal-x { background:none; border:none; color:var(--sub); font-size:16px; cursor:pointer; line-height:1; }
+.modal-body { padding:16px 20px; }
+.modal-foot { display:flex; justify-content:flex-end; gap:8px; padding:12px 20px 18px; }
+.chan-row { display:flex; gap:6px; flex-wrap:wrap; }
+.chan-btn { flex:1; min-width:70px; padding:8px 6px; font-size:12px; font-weight:600; border-radius:7px; cursor:pointer; background:var(--card2); color:var(--sub); border:1px solid var(--bdr2); transition:all .12s; }
+.chan-btn.active { background:var(--gdim); color:var(--gold); border-color:rgba(232,160,32,.5); }
+.modal-tl-wrap { margin-top:16px; border-top:1px solid var(--bdr); padding-top:12px; }
+.modal-tl-title { font-size:11px; text-transform:uppercase; letter-spacing:.6px; color:var(--dim); margin-bottom:8px; font-weight:700; }
+.modal-tl { font-size:12px; color:var(--sub); max-height:150px; overflow-y:auto; }
+.tl-item { padding:7px 0; border-bottom:1px solid var(--bdr); }
+.tl-item:last-child { border-bottom:none; }
+.tl-head { display:flex; gap:6px; align-items:center; }
+.tl-who { font-weight:600; color:var(--txt); }
+.tl-when { color:var(--dim); font-size:10px; margin-left:auto; font-family:'JetBrains Mono',monospace; }
+.tl-note { color:var(--sub); margin-top:2px; font-size:11px; }
+
+/* Leaderboard */
+.lb-tabs { display:inline-flex; background:var(--card2); border:1px solid var(--bdr2); border-radius:8px; padding:3px; gap:2px; }
+.lb-tab { padding:6px 16px; font-size:12px; font-weight:600; border:none; background:none; color:var(--sub); border-radius:6px; cursor:pointer; }
+.lb-tab.active { background:var(--gold); color:#000; }
+.lb-legend { font-size:11px; color:var(--dim); font-family:'JetBrains Mono',monospace; }
+.lb-sortable { cursor:pointer; user-select:none; }
+.lb-sortable:hover { color:var(--gold); }
+.lb-rank { display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; border-radius:50%; font-weight:800; font-size:12px; background:var(--card2); }
+.lb-rank-1 { background:rgba(232,160,32,.2); color:var(--gold); }
+.lb-rank-2 { background:rgba(136,152,184,.2); color:#aab6d0; }
+.lb-rank-3 { background:rgba(205,127,50,.18); color:#cd7f32; }
+.lb-score { font-weight:800; color:var(--gold); font-family:'JetBrains Mono',monospace; }
+
+/* Pipeline / Kanban */
+.pipe-toolbar { display:flex; align-items:center; gap:14px; margin-bottom:14px; flex-wrap:wrap; }
+.pipe-toggle { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--sub); cursor:pointer; }
+.pipe-toggle input { accent-color:var(--gold); width:14px; height:14px; }
+.pipe-hint { font-size:11px; color:var(--dim); margin-left:auto; }
+.kanban { display:flex; gap:12px; overflow-x:auto; padding-bottom:10px; align-items:flex-start; }
+.kcol { flex:0 0 250px; background:var(--sb); border:1px solid var(--bdr); border-radius:10px; display:flex; flex-direction:column; max-height:calc(100vh - 210px); }
+.kcol-head { padding:11px 13px; border-bottom:1px solid var(--bdr); display:flex; align-items:center; justify-content:space-between; position:sticky; top:0; }
+.kcol-title { font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; }
+.kcol-count { font-size:11px; font-weight:700; color:var(--dim); background:var(--card2); padding:1px 8px; border-radius:10px; font-family:'JetBrains Mono',monospace; }
+.kcol-body { padding:9px; overflow-y:auto; flex:1; display:flex; flex-direction:column; gap:8px; min-height:60px; }
+.kcol-body.drag-over { background:var(--gdim); outline:2px dashed rgba(232,160,32,.4); outline-offset:-4px; border-radius:8px; }
+.kcard { background:var(--card); border:1px solid var(--bdr2); border-radius:8px; padding:10px; cursor:grab; transition:border-color .12s, transform .08s; }
+.kcard:hover { border-color:var(--gold); }
+.kcard:active { cursor:grabbing; }
+.kcard.dragging { opacity:.5; }
+.kcard-co { font-weight:700; font-size:13px; margin-bottom:3px; }
+.kcard-sub { font-size:11px; color:var(--sub); margin-bottom:6px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.kcard-contact { font-size:10px; color:var(--dim); font-family:'JetBrains Mono',monospace; margin-bottom:7px; }
+.kcard-foot { display:flex; align-items:center; justify-content:space-between; gap:6px; }
+.kcard-owner { display:flex; align-items:center; gap:5px; font-size:10px; color:var(--sub); }
+.kowner-av { width:18px; height:18px; border-radius:50%; background:var(--blue); color:#fff; font-size:9px; font-weight:800; display:flex; align-items:center; justify-content:center; text-transform:uppercase; }
+.kowner-none { color:var(--dim); font-style:italic; }
+.kcard-btns { display:flex; gap:4px; }
+.kmini { background:var(--card2); border:1px solid var(--bdr2); color:var(--sub); font-size:10px; padding:2px 7px; border-radius:5px; cursor:pointer; }
+.kmini:hover { color:var(--gold); border-color:var(--gold); }
+.kcard-remark { font-size:10px; color:var(--gold); background:var(--gdim); border-radius:4px; padding:3px 6px; margin-bottom:7px; word-break:break-word; }
+.kmore { text-align:center; font-size:11px; color:var(--sub); padding:6px; cursor:default; }
+.kcol-closed_won .kcol-title { color:var(--green); }
+.kcol-closed_won .kcol-head { border-bottom-color:rgba(29,185,84,.3); }
+.kcol-closed_lost .kcol-title { color:#f87171; }
+.kcol-closed_lost .kcol-head { border-bottom-color:rgba(239,68,68,.25); }
 body { background:var(--bg); color:var(--txt); font-family:'Outfit',sans-serif; display:flex; font-size:14px; }
 
 /* Sidebar */
@@ -283,6 +368,22 @@ textarea:focus{border-color:var(--gold);}
 </head>
 <body>
 
+<!-- LOGIN OVERLAY — covers the whole app until authenticated -->
+<div id="login-overlay">
+  <div class="login-card">
+    <div class="login-logo"><span class="login-badge">KJSIM</span> Placement<b>Radar</b></div>
+    <div class="login-sub">Committee sign in</div>
+    <form id="login-form" onsubmit="doLogin(event)">
+      <label class="login-lbl">Email</label>
+      <input type="email" id="login-email" class="fi" autocomplete="username" required style="width:100%;margin-bottom:12px">
+      <label class="login-lbl">Password</label>
+      <input type="password" id="login-pass" class="fi" autocomplete="current-password" required style="width:100%;margin-bottom:16px">
+      <button type="submit" class="btn btn-primary" id="login-btn" style="width:100%;justify-content:center">Sign In</button>
+      <div id="login-err" class="login-err"></div>
+    </form>
+  </div>
+</div>
+
 <nav class="sidebar">
   <div class="logo-wrap">
     <div class="logo-badge">KJSIM</div>
@@ -303,6 +404,10 @@ textarea:focus{border-color:var(--gold);}
       <svg class="ni" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
       Job Board
     </div>
+    <div class="nav-item" onclick="showView('pipeline');loadPipeline()" id="nav-pipeline">
+      <svg class="ni" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="5" height="18" rx="1"/><rect x="10" y="3" width="5" height="12" rx="1"/><rect x="17" y="3" width="4" height="8" rx="1"/></svg>
+      Pipeline
+    </div>
     <div class="nav-section">Outreach</div>
     <div class="nav-item" onclick="showView('outreach');loadOutreach()" id="nav-outreach">
       <svg class="ni" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
@@ -321,6 +426,14 @@ textarea:focus{border-color:var(--gold);}
       <svg class="ni" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93l-1.41 1.41M4.93 4.93l1.41 1.41M19.07 19.07l-1.41-1.41M4.93 19.07l1.41-1.41M12 2v2M12 20v2M2 12h2M20 12h2"/></svg>
       Settings
     </div>
+    <div class="nav-item" onclick="showView('leaderboard');loadLeaderboard()" id="nav-leaderboard" style="display:none">
+      <svg class="ni" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0V4zM17 5h2a2 2 0 0 1 0 4h-2M7 5H5a2 2 0 0 0 0 4h2"/></svg>
+      Leaderboard
+    </div>
+    <div class="nav-item" onclick="showView('members');loadMembers()" id="nav-members" style="display:none">
+      <svg class="ni" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      Members
+    </div>
   </div>
   <div class="sb-foot">
     <div class="sb-row"><span>Total Jobs</span><span id="sb-total">—</span></div>
@@ -335,6 +448,11 @@ textarea:focus{border-color:var(--gold);}
     <div class="topbar-right">
       <button class="btn btn-ghost btn-sm" onclick="showView('search')">New Search</button>
       <button class="btn btn-green btn-sm" onclick="exportAll()">Export CSV</button>
+      <div id="user-chip" class="user-chip" style="display:none">
+        <span class="user-avatar" id="user-avatar">?</span>
+        <div class="user-meta"><span id="user-name">—</span><em id="user-role"></em></div>
+        <button class="btn btn-ghost btn-sm" onclick="doLogout()" title="Sign out">Logout</button>
+      </div>
     </div>
   </div>
   <div class="content">
@@ -444,8 +562,8 @@ textarea:focus{border-color:var(--gold);}
           <div class="cbar-sep"></div>
           <span class="cbar-stat"><span id="scb-em">0</span><em>emails</em></span>
           <div class="cbar-sep"></div>
-          <button class="btn btn-ghost btn-sm" onclick="copyContacts('s','phone')">📋 Copy All Phones</button>
-          <button class="btn btn-ghost btn-sm" onclick="copyContacts('s','email')">📋 Copy All Emails</button>
+          <button class="btn btn-ghost btn-sm" onclick="copyContacts('s','phone')"> Copy All Phones</button>
+          <button class="btn btn-ghost btn-sm" onclick="copyContacts('s','email')"> Copy All Emails</button>
           <span class="cbar-ok" id="scb-ok">✓ Copied!</span>
         </div>
         <div class="tw">
@@ -505,6 +623,16 @@ textarea:focus{border-color:var(--gold);}
         </table>
         <div class="pgn" id="b-pgn"></div>
       </div>
+    </div>
+
+    <!-- PIPELINE (Kanban) -->
+    <div id="view-pipeline" style="display:none">
+      <div class="pipe-toolbar">
+        <input type="text" id="pipe-search" class="fi" placeholder="Search companies…" oninput="pipeSearchDebounced()" style="max-width:240px">
+        <label class="pipe-toggle"><input type="checkbox" id="pipe-mine" onchange="loadPipeline()"> My companies only</label>
+        <span class="pipe-hint">Drag a card between columns to move it through the pipeline</span>
+      </div>
+      <div class="kanban" id="kanban"></div>
     </div>
 
     <!-- OUTREACH -->
@@ -730,21 +858,114 @@ textarea:focus{border-color:var(--gold);}
       </div>
     </div>
 
+    <!-- MEMBERS (admin only) -->
+    <div id="view-members" style="display:none">
+      <div class="card" style="margin-bottom:14px">
+        <div class="card-title">Add Committee Member</div>
+        <div style="display:grid;grid-template-columns:1fr 1.4fr 1fr 0.9fr auto;gap:10px;align-items:end">
+          <div class="sf"><label>Name</label><input type="text" id="mem-name" placeholder="Aryan Dalvi"></div>
+          <div class="sf"><label>Email</label><input type="email" id="mem-email" placeholder="Aryan.folk@kjsim.edu.in"></div>
+          <div class="sf"><label>Password</label><input type="password" id="mem-pass" placeholder="min 8 characters"></div>
+          <div class="sf"><label>Role</label><select class="fs" id="mem-role" style="width:100%"><option value="member">member</option><option value="admin">Admin</option></select></div>
+          <button class="btn btn-primary btn-sm" onclick="addMember()" style="margin-bottom:2px">Add</button>
+        </div>
+        <div id="mem-err" style="font-size:12px;color:#f87171;margin-top:8px"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Committee Members</div>
+        <div class="tw" style="border:none">
+          <table>
+            <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Added</th><th>Actions</th></tr></thead>
+            <tbody id="mem-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- LEADERBOARD (admin only) -->
+    <div id="view-leaderboard" style="display:none">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+        <div class="lb-tabs">
+          <button class="lb-tab active" id="lb-tab-week" onclick="setLbRange('week')">This Week</button>
+          <button class="lb-tab" id="lb-tab-all" onclick="setLbRange('all')">All-Time</button>
+        </div>
+        <div class="lb-legend" id="lb-legend"></div>
+      </div>
+      <div class="card">
+        <div class="tw" style="border:none">
+          <table>
+            <thead><tr>
+              <th style="width:44px">#</th>
+              <th>Member</th>
+              <th class="lb-sortable" onclick="sortLb('score')">Score ▾</th>
+              <th class="lb-sortable" onclick="sortLb('companies')">Companies</th>
+              <th class="lb-sortable" onclick="sortLb('calls')">Calls</th>
+              <th class="lb-sortable" onclick="sortLb('emails')">Emails</th>
+              <th class="lb-sortable" onclick="sortLb('whatsapps')">WhatsApp</th>
+              <th class="lb-sortable" onclick="sortLb('replies')">Replies</th>
+              <th class="lb-sortable" onclick="sortLb('drives')">Drives</th>
+            </tr></thead>
+            <tbody id="lb-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- LOG ACTIVITY MODAL -->
+<div id="log-modal" class="modal-back" style="display:none">
+  <div class="modal-card">
+    <div class="modal-head">
+      <div><div class="modal-title">Log Activity</div><div class="modal-sub" id="log-co">—</div></div>
+      <button class="modal-x" onclick="closeLog()">✕</button>
+    </div>
+    <div class="modal-body">
+      <label class="login-lbl">Channel <em style="color:var(--dim);font-style:normal;text-transform:none;letter-spacing:0">— tap to select one or more</em></label>
+      <div class="chan-row" id="log-channels">
+        <button type="button" class="chan-btn active" data-ch="call">📞 Call</button>
+        <button type="button" class="chan-btn" data-ch="email">✉️ Email</button>
+        <button type="button" class="chan-btn" data-ch="whatsapp">💬 WhatsApp</button>
+        <button type="button" class="chan-btn" data-ch="note">📝 Note</button>
+      </div>
+      <label class="login-lbl" style="margin-top:12px">Outcome</label>
+      <select class="fs" id="log-outcome" style="width:100%">
+        <option value="">— none —</option>
+        <option value="interested">Interested</option>
+        <option value="not_interested">Not interested</option>
+        <option value="callback">Call back later</option>
+        <option value="no_answer">No answer</option>
+        <option value="reply_received">Reply received</option>
+        <option value="drive_scheduled">Drive scheduled</option>
+      </select>
+      <label class="login-lbl" style="margin-top:12px">Note <em style="color:var(--dim);font-style:normal">(optional)</em></label>
+      <textarea id="log-note" rows="3" placeholder="e.g. Spoke to HR, asked to call after Diwali" style="width:100%"></textarea>
+      <div class="modal-tl-wrap"><div class="modal-tl-title">History</div><div id="log-timeline" class="modal-tl">No activity yet.</div></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost btn-sm" onclick="closeLog()">Cancel</button>
+      <button class="btn btn-primary btn-sm" id="log-save" onclick="saveLog()">Save Activity</button>
+    </div>
   </div>
 </div>
 
 <div id="toast"></div>
 
 <script>
-// ── Auth: attach X-API-Key to every API call; prompt once on 401 ──────────────
+// ── Auth: session-based (CRM Phase 1). Cookies carry the login automatically. ──
+// A 401 means "not logged in / session expired" — surface the login screen
+// instead of the old access-key prompt. The auth endpoints themselves are
+// exempt so a failed login shows its own inline error, not a reload loop.
 (function(){
   const _fetch=window.fetch.bind(window);
+  const AUTH_PATHS=['/api/auth/login','/api/auth/me','/api/auth/logout'];
   window.fetch=async function(url,opts={}){
-    opts.headers=Object.assign({},opts.headers||{},{'X-API-Key':localStorage.getItem('pr_key')||''});
-    let r=await _fetch(url,opts);
-    if(r.status===401){
-      const k=prompt('This app is protected. Enter the access key:');
-      if(k){localStorage.setItem('pr_key',k);opts.headers['X-API-Key']=k;r=await _fetch(url,opts);}
+    const r=await _fetch(url,opts);
+    const u=String(url||'');
+    if(r.status===401 && !AUTH_PATHS.some(p=>u.includes(p))){
+      const ov=document.getElementById('login-overlay');
+      if(ov && ov.style.display==='none'){ showLogin(); }   // session dropped mid-use
     }
     return r;
   };
@@ -780,7 +1001,7 @@ function showView(v){
   document.querySelectorAll('.nav-item').forEach(e=>e.classList.remove('active'));
   document.getElementById('view-'+v).style.display='block';
   document.getElementById('nav-'+v).classList.add('active');
-  const t={dashboard:'Dashboard',search:'Job Search',board:'Job Board',outreach:'Outreach',settings:'Settings',hrdb:'HR Database',custom:'Custom Sites',hn_hiring:'HN Hiring',turing:'Turing',upwork:'Upwork',flexjobs:'FlexJobs'};
+  const t={dashboard:'Dashboard',search:'Job Search',board:'Job Board',pipeline:'Pipeline',outreach:'Outreach',settings:'Settings',hrdb:'HR Database',custom:'Custom Sites',members:'Members',leaderboard:'Team Leaderboard',hn_hiring:'HN Hiring',turing:'Turing',upwork:'Upwork',flexjobs:'FlexJobs'};
   document.getElementById('page-title').textContent=t[v]||v;
 }
 
@@ -1007,10 +1228,10 @@ function renderBTable(){
         <td><span class="bdg bdg-${(r.site||'').replace('_','')}">${esc(r.site||'—')}</span></td>
         <td class="ec wrap" style="max-width:180px">${r.emails?r.emails.split(', ').slice(0,2).map(e=>`<div>${esc(e)}${e===r.hr_contact?' ★':''}</div>`).join(''):'<span style="color:var(--dim)">—</span>'}</td>
         <td class="pc">${(r.phone&&r.phone!=='—')?fmtPhone(r.phone):'<span style="color:var(--dim)">—</span>'}</td>
-        <td><select class="fs" style="font-size:11px;padding:3px 6px" onchange="updStatus('${r.id}',this.value)">${['new','contacted','replied','drive_scheduled','rejected','not_interested'].map(s=>`<option value="${s}" ${r.status===s?'selected':''}>${slbl(s)}</option>`).join('')}</select></td>
+        <td><select class="fs" style="font-size:11px;padding:3px 6px" onchange="updStatus('${r.id}',this.value)">${['new','contacted','replied','drive_scheduled','placed','rejected','not_interested'].map(s=>`<option value="${s}" ${r.status===s?'selected':''}>${slbl(s)}</option>`).join('')}</select></td>
         <td><select class="fs" style="font-size:11px;padding:3px 6px" onchange="updScore('${r.id}',this.value)"><option value="0" ${!r.score?'selected':''}>—</option>${[1,2,3,4,5].map(n=>`<option value="${n}" ${r.score===n?'selected':''}>${'★'.repeat(n)}</option>`).join('')}</select></td>
         <td class="dtc">${fmtDT(r.created_at)}</td>
-        <td><div style="display:flex;gap:4px">${phoneHref?`<a href="tel:${esc(phoneHref.replace(/[^\d+]/g,''))}" class="btn btn-ghost btn-sm" style="padding:3px 8px;font-size:10px;color:var(--green);border-color:var(--green);text-decoration:none">Call</a>`:''} ${emailAddr?`<button class="btn btn-blue btn-sm" style="padding:3px 8px;font-size:10px" onclick="qEmailIdx(${(bPage-1)*PG+i})">Email</button>`:''} ${safeUrl(r.job_url)?`<button class="btn btn-ghost btn-sm" style="padding:3px 8px;font-size:10px" onclick="viewJobIdx(${(bPage-1)*PG+i})">View</button>`:''}</div></td>
+        <td><div style="display:flex;gap:4px;flex-wrap:wrap">${phoneHref?`<a href="tel:${esc(phoneHref.replace(/[^\d+]/g,''))}" class="btn btn-ghost btn-sm" style="padding:3px 8px;font-size:10px;color:var(--green);border-color:var(--green);text-decoration:none">Call</a>`:''} <button class="btn btn-sm" style="padding:3px 8px;font-size:10px;background:var(--gdim);color:var(--gold);border:1px solid rgba(232,160,32,.35)" onclick="openLog(${(bPage-1)*PG+i})" title="Log a call / email / note">＋ Log</button> ${safeUrl(r.job_url)?`<button class="btn btn-ghost btn-sm" style="padding:3px 8px;font-size:10px" onclick="viewJobIdx(${(bPage-1)*PG+i})">View</button>`:''}</div></td>
       </tr>`;
     }).join('');
     renderPgn('b',filteredB.length,bPage,p=>{bPage=p;renderBTable();});
@@ -1396,9 +1617,9 @@ async function testGmail(){
 }
 
 const SCYCLE=['new','contacted','replied','drive_scheduled','rejected'];
-function scls(s){return{new:'sn',contacted:'sc3',replied:'sr',drive_scheduled:'sd',rejected:'sx',not_interested:'si'}[s]||'sn';}
+function scls(s){return{new:'sn',contacted:'sc3',replied:'sr',drive_scheduled:'sd',placed:'sr',rejected:'sx',not_interested:'si'}[s]||'sn';}
 function cycleSIdx(el,idx){const r=filteredS[idx];if(!r)return;const cur=r.status||'new';const nx=SCYCLE[(SCYCLE.indexOf(cur)+1)%SCYCLE.length];el.className=`pill ${scls(nx)}`;el.textContent=slbl(nx);r.status=nx;}
-function slbl(s){return{new:'New',contacted:'Contacted',replied:'Replied',drive_scheduled:'Drive Sched.',rejected:'Rejected',not_interested:'Not Interested'}[s]||s;}
+function slbl(s){return{new:'New',contacted:'Contacted',replied:'Replied',drive_scheduled:'Drive Sched.',placed:'Placed ✓',rejected:'Rejected',not_interested:'Not Interested'}[s]||s;}
 
 function exportSearch(){if(!currentJobId){toast('No search results','error');return;}window.location.href=`/api/export?source=scrape&job_id=${currentJobId}`;}
 function exportAll(){window.location.href='/api/export?source=board';}
@@ -1482,9 +1703,297 @@ function exportHRDB(){
   const a=document.createElement('a');a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv);a.download='hr_contacts_kjsim.csv';a.click();
 }
 
-loadDashboard();
-loadBoard();
-loadHRDB();
+// ── Auth (CRM Phase 1) ────────────────────────────────────────────────────────
+let currentUser=null;
+
+async function boot(){
+  let data;
+  try{ data=await window.fetch('/api/auth/me').then(r=>r.json()); }
+  catch(e){ data={user:null,needs_login:false}; }
+  if(data.user){
+    currentUser=data.user;
+    showApp();
+  }else if(data.needs_login){
+    showLogin();                       // production / accounts exist → must sign in
+  }else{
+    showApp();                         // dev mode, no accounts → open, no login
+  }
+}
+
+function showLogin(){
+  document.getElementById('login-overlay').style.display='flex';
+  setTimeout(()=>document.getElementById('login-email').focus(),50);
+}
+
+function showApp(){
+  document.getElementById('login-overlay').style.display='none';
+  // Show who's signed in (only when there IS a user — dev mode has none)
+  if(currentUser){
+    const chip=document.getElementById('user-chip');chip.style.display='flex';
+    document.getElementById('user-avatar').textContent=(currentUser.name||currentUser.email||'?').trim()[0]||'?';
+    document.getElementById('user-name').textContent=currentUser.name||currentUser.email;
+    document.getElementById('user-role').textContent=currentUser.role;
+    const adminNav=currentUser.role==='admin'?'flex':'none';
+    document.getElementById('nav-members').style.display=adminNav;
+    document.getElementById('nav-leaderboard').style.display=adminNav;
+  }
+  loadDashboard();
+  loadBoard();
+  loadHRDB();
+}
+
+async function doLogin(e){
+  e.preventDefault();
+  const btn=document.getElementById('login-btn');const err=document.getElementById('login-err');
+  err.textContent='';btn.disabled=true;btn.textContent='Signing in...';
+  try{
+    const r=await window.fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({email:document.getElementById('login-email').value,password:document.getElementById('login-pass').value})});
+    const d=await r.json();
+    if(r.ok){ currentUser=d.user; document.getElementById('login-pass').value=''; showApp(); }
+    else{ err.textContent=d.error||'Login failed'; }
+  }catch(ex){ err.textContent='Network error — is the server running?'; }
+  finally{ btn.disabled=false; btn.textContent='Sign In'; }
+}
+
+async function doLogout(){
+  try{ await window.fetch('/api/auth/logout',{method:'POST'}); }catch(e){}
+  location.reload();                    // simplest reliable reset of all app state
+}
+
+// ── Members admin panel ───────────────────────────────────────────────────────
+let membersData=[];
+async function loadMembers(){
+  const d=await fetch('/api/users').then(r=>r.json()).catch(()=>({users:[]}));
+  membersData=d.users||[];
+  const tb=document.getElementById('mem-tbody');
+  if(!membersData.length){tb.innerHTML='<tr><td colspan="6" class="empty" style="padding:16px">No members yet</td></tr>';return;}
+  tb.innerHTML=membersData.map((u,i)=>{
+    const isMe=currentUser&&u.email===currentUser.email;
+    return `<tr>
+      <td style="font-weight:500">${esc(u.name||'—')}${isMe?' <span style="color:var(--gold);font-size:10px">(you)</span>':''}</td>
+      <td class="ec">${esc(u.email)}</td>
+      <td><span class="bdg">${esc(u.role)}</span></td>
+      <td>${u.active!==false?'<span style="color:var(--green)">Active</span>':'<span style="color:var(--dim)">Disabled</span>'}</td>
+      <td style="color:var(--dim);font-size:11px">${(u.created_at||'').substring(0,10)}</td>
+      <td>${isMe?'<span style="color:var(--dim);font-size:11px">—</span>':`<button class="btn btn-sm" style="background:rgba(239,68,68,.12);color:#f87171;border:1px solid rgba(239,68,68,.2)" onclick="removeMember(${i})">Remove</button>`}</td>
+    </tr>`;
+  }).join('');
+}
+async function addMember(){
+  const err=document.getElementById('mem-err');err.textContent='';
+  const body={name:document.getElementById('mem-name').value,email:document.getElementById('mem-email').value,
+    password:document.getElementById('mem-pass').value,role:document.getElementById('mem-role').value};
+  const r=await fetch('/api/users',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const d=await r.json();
+  if(r.ok){ document.getElementById('mem-name').value='';document.getElementById('mem-email').value='';document.getElementById('mem-pass').value='';
+    toast('Member added','success'); loadMembers(); }
+  else{ err.textContent=d.error||'Could not add member'; }
+}
+async function removeMember(i){
+  const u=membersData[i];if(!u)return;
+  if(!confirm(`Remove ${u.name||u.email} from the committee?`))return;
+  const r=await fetch(`/api/users/${u.id}`,{method:'DELETE'});
+  if(r.ok){ toast('Member removed','success'); loadMembers(); }
+  else{ const d=await r.json().catch(()=>({})); toast(d.error||'Could not remove','error'); }
+}
+
+// ── Activity logging (CRM Phase 2) ────────────────────────────────────────────
+let logJob=null, logChannels=new Set(['call']);
+function _paintChannels(){ document.querySelectorAll('#log-channels .chan-btn').forEach(b=>b.classList.toggle('active',logChannels.has(b.dataset.ch))); }
+function openLog(idx){
+  const r=filteredB[idx]; if(!r) return;
+  logJob=r; logChannels=new Set(['call']);
+  document.getElementById('log-co').textContent=r.company||'—';
+  document.getElementById('log-outcome').value='';
+  document.getElementById('log-note').value='';
+  _paintChannels();
+  document.getElementById('log-timeline').innerHTML='Loading…';
+  document.getElementById('log-modal').style.display='flex';
+  loadTimeline(r.id);
+}
+function closeLog(){ document.getElementById('log-modal').style.display='none'; logJob=null; }
+// Channels are multi-select: click to toggle. At least one must stay selected.
+document.getElementById('log-channels').addEventListener('click',e=>{
+  const b=e.target.closest('.chan-btn'); if(!b) return;
+  const ch=b.dataset.ch;
+  if(logChannels.has(ch)){ if(logChannels.size>1) logChannels.delete(ch); }  // keep >=1
+  else logChannels.add(ch);
+  _paintChannels();
+});
+async function loadTimeline(jobId){
+  const el=document.getElementById('log-timeline');
+  const d=await fetch(`/api/jobs/${jobId}/activities`).then(r=>r.json()).catch(()=>({activities:[]}));
+  const acts=d.activities||[];
+  if(!acts.length){ el.innerHTML='<span style="color:var(--dim)">No activity yet.</span>'; return; }
+  const ICON={call:'📞',email:'✉️',whatsapp:'💬',note:'📝'};
+  el.innerHTML=acts.map(a=>{
+    const chans=(a.channels&&a.channels.length)?a.channels:(a.channel?[a.channel]:[]);
+    const icons=chans.map(c=>ICON[c]||'•').join(' ')||'•';
+    return `<div class="tl-item">
+    <div class="tl-head"><span title="${esc(chans.join(', '))}">${icons}</span><span class="tl-who">${esc(a.user_name||'—')}</span>${a.outcome?`<span class="bdg" style="font-size:9px">${esc(a.outcome.replace(/_/g,' '))}</span>`:''}<span class="tl-when">${fmtWhen(a.created_at)}</span></div>
+    ${a.note?`<div class="tl-note">${esc(a.note)}</div>`:''}
+  </div>`;}).join('');
+}
+function fmtWhen(iso){ try{const d=new Date(iso);if(isNaN(d))return'';const day=d.toLocaleDateString('en-IN',{day:'2-digit',month:'short'});const t=d.toLocaleTimeString('en-IN',{hour:'numeric',minute:'2-digit',hour12:true});return `${day} ${t}`;}catch(e){return'';} }
+async function saveLog(){
+  if(!logJob) return;
+  const btn=document.getElementById('log-save'); btn.disabled=true; btn.textContent='Saving…';
+  try{
+    const r=await fetch('/api/activities',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({job_id:logJob.id,company:logJob.company,channels:[...logChannels],
+        outcome:document.getElementById('log-outcome').value,note:document.getElementById('log-note').value})});
+    const d=await r.json();
+    if(r.ok){ toast('Activity logged','success'); loadTimeline(logJob.id);
+      document.getElementById('log-note').value='';
+      if(document.getElementById('view-pipeline').style.display!=='none') loadPipeline();
+      else loadBoard(); }
+    else toast(d.error||'Could not log','error');
+  }finally{ btn.disabled=false; btn.textContent='Save Activity'; }
+}
+
+// ── Leaderboard (CRM Phase 3 — admin only) ────────────────────────────────────
+let lbRange='week', lbData=[], lbSort='score';
+function setLbRange(rng){ lbRange=rng;
+  document.getElementById('lb-tab-week').classList.toggle('active',rng==='week');
+  document.getElementById('lb-tab-all').classList.toggle('active',rng==='all');
+  loadLeaderboard();
+}
+function sortLb(k){ lbSort=k; lbData.sort((a,b)=>(b[k]||0)-(a[k]||0)); renderLb(); }
+async function loadLeaderboard(){
+  const d=await fetch(`/api/leaderboard?range=${lbRange}`).then(r=>r.json()).catch(()=>({board:[],weights:{}}));
+  lbData=d.board||[]; lbSort='score';
+  const w=d.weights||{};
+  document.getElementById('lb-legend').textContent=
+    `Score = reply/drive ×${w.reply_received||5} · interested ×${w.interested||3} · company ×${w.company||2} · call/email/wa ×1`;
+  renderLb();
+}
+function renderLb(){
+  const tb=document.getElementById('lb-tbody');
+  if(!lbData.length){ tb.innerHTML='<tr><td colspan="9" class="empty" style="padding:20px">No members or activity yet</td></tr>'; return; }
+  tb.innerHTML=lbData.map((r,i)=>{
+    const rankCls=lbSort==='score'?`lb-rank lb-rank-${i+1}`:'lb-rank';
+    const rank=lbSort==='score'?i+1:'·';
+    return `<tr>
+      <td><span class="${rankCls}">${rank}</span></td>
+      <td style="font-weight:600">${esc(r.user_name||'—')}</td>
+      <td><span class="lb-score">${r.score}</span></td>
+      <td>${r.companies}</td><td>${r.calls}</td><td>${r.emails}</td>
+      <td>${r.whatsapps}</td><td>${r.replies}</td><td>${r.drives}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Pipeline / Kanban (CRM) ───────────────────────────────────────────────────
+const STAGES=[
+  {key:'to_contact',      label:'To Contact'},
+  {key:'contacted',       label:'Contacted'},
+  {key:'interested',      label:'Interested'},
+  {key:'drive_scheduled', label:'Drive Scheduled'},
+  {key:'closed_won',      label:'Closed · Won'},
+  {key:'closed_lost',     label:'Closed · Lost'},
+];
+let pipeCols={}, pipeCounts={}, pipeMembers=[], pipeSearchT=null, dragId=null, dragFrom=null;
+
+function pipeSearchDebounced(){ clearTimeout(pipeSearchT); pipeSearchT=setTimeout(loadPipeline,300); }
+
+async function loadPipeline(){
+  const mine=document.getElementById('pipe-mine').checked?'1':'0';
+  const q=encodeURIComponent(document.getElementById('pipe-search').value.trim());
+  const d=await fetch(`/api/pipeline?mine=${mine}&search=${q}`).then(r=>r.json()).catch(()=>({columns:{},counts:{}}));
+  pipeCols=d.columns||{}; pipeCounts=d.counts||{};
+  // Members list for assignment (admins can fetch; others just won't get the list)
+  if(currentUser&&currentUser.role==='admin'&&!pipeMembers.length){
+    const mu=await fetch('/api/users').then(r=>r.json()).catch(()=>({users:[]}));
+    pipeMembers=(mu.users||[]).filter(u=>u.active!==false);
+  }
+  renderKanban();
+}
+
+function renderKanban(){
+  const wrap=document.getElementById('kanban');
+  wrap.innerHTML=STAGES.map(st=>{
+    const cards=pipeCols[st.key]||[];
+    const total=pipeCounts[st.key]||0;
+    const cardHtml=cards.map(c=>kcard(c,st.key)).join('')||'<div class="kmore" style="color:var(--dim)">—</div>';
+    const more=(st.key==='to_contact'&&total>cards.length)?`<div class="kmore">+${total-cards.length} more — use search to narrow</div>`:'';
+    return `<div class="kcol kcol-${st.key}">
+      <div class="kcol-head"><span class="kcol-title">${st.label}</span><span class="kcol-count">${total}</span></div>
+      <div class="kcol-body" data-stage="${st.key}"
+           ondragover="kDragOver(event)" ondragleave="kDragLeave(event)" ondrop="kDrop(event,'${st.key}')">
+        ${cardHtml}${more}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function kcard(c,stage){
+  const contact=(c.phone&&c.phone!=='—')?c.phone.split(', ')[0]:(c.emails?c.emails.split(', ')[0]:'');
+  const owner=c.assigned_name
+    ? `<span class="kcard-owner"><span class="kowner-av">${esc((c.assigned_name||'?')[0])}</span>${esc(c.assigned_name)}</span>`
+    : `<span class="kcard-owner kowner-none">Unassigned</span>`;
+  const remark=c.notes?`<div class="kcard-remark" title="${esc(c.notes)}">📝 ${esc(c.notes.length>70?c.notes.slice(0,70)+'…':c.notes)}</div>`:'';
+  const canAssign=currentUser&&currentUser.role==='admin';
+  return `<div class="kcard" draggable="true" data-id="${esc(c.id)}"
+       ondragstart="kDragStart(event,'${esc(c.id)}','${stage}')" ondragend="kDragEnd(event)">
+    <div class="kcard-co">${esc(c.company||'—')}</div>
+    <div class="kcard-sub" title="${esc(c.title)}">${esc(c.title||'')}</div>
+    ${contact?`<div class="kcard-contact">${esc(contact)}</div>`:''}
+    ${remark}
+    <div class="kcard-foot">
+      ${owner}
+      <div class="kcard-btns">
+        <button class="kmini" onclick="kLog('${esc(c.id)}')">Log</button>
+        <button class="kmini" onclick="kRemark('${esc(c.id)}')">Note</button>
+        ${canAssign?`<button class="kmini" onclick="kAssign('${esc(c.id)}')">Owner</button>`:''}
+      </div>
+    </div>
+  </div>`;
+}
+
+// Drag & drop
+function kDragStart(e,id,from){ dragId=id; dragFrom=from; e.currentTarget.classList.add('dragging'); e.dataTransfer.effectAllowed='move'; }
+function kDragEnd(e){ e.currentTarget.classList.remove('dragging'); }
+function kDragOver(e){ e.preventDefault(); e.currentTarget.classList.add('drag-over'); }
+function kDragLeave(e){ e.currentTarget.classList.remove('drag-over'); }
+async function kDrop(e,stage){
+  e.preventDefault(); e.currentTarget.classList.remove('drag-over');
+  if(!dragId||stage===dragFrom) return;
+  const card=findCard(dragId); const company=card?card.company:'';
+  const r=await fetch(`/api/jobs/${dragId}/stage`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({stage,company})});
+  if(r.ok){ toast('Moved to '+STAGES.find(s=>s.key===stage).label,'success'); loadPipeline(); }
+  else{ const d=await r.json().catch(()=>({})); toast(d.error||'Could not move card','error'); }
+  dragId=null; dragFrom=null;
+}
+function findCard(id){ for(const k in pipeCols){const c=(pipeCols[k]||[]).find(x=>x.id===id); if(c)return c;} return null; }
+
+// Card actions
+function kLog(id){ const c=findCard(id); if(!c)return; logJob=c; logChannels=new Set(['call']);
+  document.getElementById('log-co').textContent=c.company||'—';
+  document.getElementById('log-outcome').value=''; document.getElementById('log-note').value='';
+  _paintChannels();
+  document.getElementById('log-modal').style.display='flex'; loadTimeline(id);
+}
+async function kRemark(id){ const c=findCard(id); if(!c)return;
+  const val=prompt('Remarks for '+(c.company||'this company')+':', c.notes||'');
+  if(val===null)return;
+  const r=await fetch(`/api/jobs/${id}/remarks`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({remarks:val})});
+  if(r.ok){ toast('Remark saved','success'); loadPipeline(); }
+}
+async function kAssign(id){ const c=findCard(id); if(!c)return;
+  if(!pipeMembers.length){ toast('No members to assign','error'); return; }
+  const names=pipeMembers.map((m,i)=>`${i+1}. ${m.name||m.email}`).join('\n');
+  const pick=prompt(`Assign ${c.company||'company'} to:\n${names}\n\n0. Unassign\nEnter a number:`,'');
+  if(pick===null)return;
+  const n=parseInt(pick,10);
+  let uid='';
+  if(n>=1&&n<=pipeMembers.length) uid=pipeMembers[n-1].id;
+  else if(n!==0){ toast('Invalid choice','error'); return; }
+  const r=await fetch(`/api/jobs/${id}/assign`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:uid})});
+  if(r.ok){ toast(uid?'Assigned':'Unassigned','success'); loadPipeline(); }
+}
+
+boot();
 </script>
 </body>
 </html>
