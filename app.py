@@ -12,29 +12,130 @@ from database import (init_db, get_settings, save_settings, save_search,
                       save_outreach, get_outreach,
                       get_jobs_without_contacts, update_job_contacts,
                       create_scrape_job, update_scrape_job, get_scrape_job,
-                      get_scrape_results_by_search, get_followups_due)
+                      get_scrape_results_by_search, get_followups_due,
+                      create_user, get_user_by_email, list_users,
+                      set_user_active, delete_user,
+                      log_activity, get_activities_for_job, get_leaderboard,
+                      get_pipeline, assign_job, set_job_remarks,
+                      STAGE_TO_STATUS, get_user_by_id, get_job_owner)
+import auth
+from datetime import datetime, timedelta
 
 app = Flask(__name__)
 init_db()
+auth.init_app_secret(app)          # signed-session secret + hardened cookie flags
+auth.bootstrap_first_admin()       # seed the sir's admin account on first run
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
-# When APP_API_KEY is set (production), every /api route requires the
-# X-API-Key header. /api/dashboard stays open — it is the deploy health check
-# and keepalive ping target, and exposes only aggregate counts.
+# Two credentials are accepted, checked in this order:
+#   1. Per-user login session (CRM Phase 1) — the committee's browser accounts.
+#   2. X-API-Key header (APP_API_KEY) — machine/CI access, e.g. keepalive pings.
+# /api/dashboard stays open (deploy health check + keepalive) and the auth
+# endpoints below are always reachable so people can actually log in.
+#
+# Dev mode: if NEITHER APP_API_KEY nor any user account exists, auth is disabled
+# so local development still works with zero setup (a warning is printed).
 APP_API_KEY = os.environ.get('APP_API_KEY', '')
-if not APP_API_KEY:
-    print('[WARN] APP_API_KEY not set — API is UNAUTHENTICATED (dev mode only)')
+
+# Paths reachable without being logged in.
+_OPEN_PATHS = {'/api/dashboard', '/api/auth/login', '/api/auth/me', '/api/auth/logout'}
 
 @app.before_request
-def _require_api_key():
-    if not APP_API_KEY:
-        return                                    # dev mode — auth disabled
-    if not request.path.startswith('/api'):
-        return                                    # the SPA page itself
-    if request.path == '/api/dashboard':
-        return                                    # health check / keepalive
-    if request.headers.get('X-API-Key') != APP_API_KEY:
-        return jsonify({'error': 'unauthorized'}), 401
+def _require_auth():
+    path = request.path
+    if not path.startswith('/api'):
+        return                                    # the SPA page / static assets
+    if path in _OPEN_PATHS:
+        return                                    # login flow + health check
+    # 1) Valid machine API key? (checked first — cheap, no DB hit)
+    if APP_API_KEY and request.headers.get('X-API-Key') == APP_API_KEY:
+        return
+    # 2) Local-dev-with-no-accounts fallback. auth_disabled() is ALWAYS False in
+    #    production (SECRET_KEY set), so a missing admin seed can never open the
+    #    app to the internet. In prod this short-circuits without a DB query.
+    if auth.auth_disabled():
+        return
+    # 3) Logged-in browser session? (the only DB hit, and only when needed)
+    if auth.current_user() is not None:
+        return
+    return jsonify({'error': 'authentication required'}), 401
+
+
+# ── Auth endpoints ────────────────────────────────────────────────────────────
+@app.route('/api/auth/login', methods=['POST'])
+def auth_login():
+    data = request.json or {}
+    email = (data.get('email') or '').strip().lower()
+    password = data.get('password') or ''
+    user = get_user_by_email(email)
+    # Verify even when the user is missing? We short-circuit but return the same
+    # generic message either way so we don't reveal which emails exist.
+    if not user or not user.get('active', True) or \
+            not auth.verify_password(user.get('password', ''), password):
+        return jsonify({'error': 'Invalid email or password'}), 401
+    auth.login_user(user)
+    return jsonify({'user': {'name': user.get('name'), 'email': user['email'],
+                             'role': user.get('role', 'member')}})
+
+@app.route('/api/auth/logout', methods=['POST'])
+def auth_logout():
+    auth.logout_user()
+    return jsonify({'success': True})
+
+@app.route('/api/auth/me')
+def auth_me():
+    user = auth.current_user()
+    if not user:
+        # Login is required whenever auth is not disabled (prod, or dev once
+        # accounts/an API key exist). Uses the cached check — no per-call DB hit.
+        return jsonify({'user': None, 'needs_login': not auth.auth_disabled()})
+    return jsonify({'user': {'name': user.get('name'), 'email': user['email'],
+                             'role': user.get('role', 'member')}})
+
+
+# ── Admin: user management (sir only) ─────────────────────────────────────────
+@app.route('/api/users', methods=['GET'])
+@auth.admin_required
+def api_list_users():
+    return jsonify({'users': list_users()})
+
+@app.route('/api/users', methods=['POST'])
+@auth.admin_required
+def api_add_user():
+    data = request.json or {}
+    name = (data.get('name') or '').strip()
+    email = (data.get('email') or '').strip().lower()
+    password = data.get('password') or ''
+    role = data.get('role', 'member')
+    if not email:
+        return jsonify({'error': 'Email is required'}), 400
+    pw_err = auth.validate_password(password)
+    if pw_err:
+        return jsonify({'error': pw_err}), 400
+    uid = create_user(name, email, auth.hash_password(password), role=role)
+    if not uid:
+        return jsonify({'error': 'A user with that email already exists'}), 409
+    auth.note_user_created()   # keep the "any users exist" cache warm
+    return jsonify({'success': True, 'id': uid})
+
+@app.route('/api/users/<user_id>', methods=['DELETE'])
+@auth.admin_required
+def api_delete_user(user_id):
+    # Guard: never let the last admin delete themselves out of the system.
+    me = auth.current_user()
+    if me and me['_id'] == user_id:
+        return jsonify({'error': 'You cannot delete your own account'}), 400
+    delete_user(user_id)
+    return jsonify({'success': True})
+
+@app.route('/api/users/<user_id>/active', methods=['POST'])
+@auth.admin_required
+def api_toggle_user(user_id):
+    me = auth.current_user()
+    if me and me['_id'] == user_id:
+        return jsonify({'error': 'You cannot deactivate your own account'}), 400
+    set_user_active(user_id, (request.json or {}).get('active', True))
+    return jsonify({'success': True})
 
 # In-memory tracker — used as fallback when GITHUB_PAT not set (local dev)
 scrape_jobs = {}
@@ -90,15 +191,18 @@ SECRET_SETTINGS = ('gmail_app_password', 'serper_api_key')
 
 @app.route('/api/settings', methods=['GET'])
 def api_get_settings():
+    # Readable by any logged-in user: members need college name + templates for
+    # outreach. Secrets are masked, so this leaks nothing sensitive.
     s = get_settings()
-    # Mask every secret, not just the Gmail password
     for key in SECRET_SETTINGS:
         if s.get(key):
             s[key] = '••••••••'
     return jsonify(s)
 
 @app.route('/api/settings', methods=['POST'])
+@auth.admin_required
 def api_save_settings():
+    # Admin only — writing settings can change Gmail creds, API keys, templates.
     data = request.json or {}
     # Don't overwrite secrets with their masked placeholder
     for key in SECRET_SETTINGS:
@@ -108,6 +212,7 @@ def api_save_settings():
     return jsonify({'success': True})
 
 @app.route('/api/settings/test-smtp', methods=['POST'])
+@auth.admin_required
 def test_smtp():
     from email_sender import test_smtp as _test
     s = get_settings()
@@ -452,6 +557,153 @@ def bulk_send():
 @app.route('/api/outreach/log')
 def outreach_log():
     return jsonify({'outreach': get_outreach(100)})
+
+# ── Activities (CRM Phase 2) ──────────────────────────────────────────────────
+def _acting_user():
+    """The logged-in user, or a synthetic 'dev' identity when auth is disabled
+    (local dev with no accounts) so activity logging still works locally."""
+    u = auth.current_user()
+    if u:
+        return u['_id'], (u.get('name') or u.get('email') or 'User')
+    return 'dev', 'Dev (local)'
+
+def _can_edit_job(job_id):
+    """Ownership rule (CRM): the sir (admin) can edit any company; a member can
+    edit only companies assigned to them or still unassigned. Returns
+    (allowed: bool, error_response_or_None).
+
+    In dev mode (auth disabled) everything is allowed so local work is frictionless.
+    """
+    if auth.auth_disabled():
+        return True, None
+    user = auth.current_user()
+    if user is None:
+        return False, (jsonify({'error': 'authentication required'}), 401)
+    if user.get('role') == 'admin':
+        return True, None
+    owner, exists = get_job_owner(job_id)
+    if not exists:
+        return False, (jsonify({'error': 'Company not found'}), 404)
+    if owner and owner != user['_id']:
+        return False, (jsonify({
+            'error': 'This company is assigned to another member. Ask an admin to reassign it.'
+        }), 403)
+    return True, None
+
+@app.route('/api/activities', methods=['POST'])
+def add_activity():
+    """Log one activity (one or more channels) against a company, stamped user."""
+    data = request.json or {}
+    # Accept a channels list (new multi-select) or a single channel (legacy).
+    channels = data.get('channels')
+    if not channels:
+        single = (data.get('channel') or '').strip().lower()
+        channels = [single] if single else []
+    channels = [c for c in (channels or []) if c in ('call', 'email', 'whatsapp', 'note')]
+    if not channels:
+        return jsonify({'error': 'Pick at least one channel'}), 400
+    jid_check = data.get('job_id', '')
+    if jid_check:
+        allowed, err = _can_edit_job(jid_check)
+        if not allowed:
+            return err
+    uid, uname = _acting_user()
+    aid = log_activity(
+        job_id=data.get('job_id', ''),
+        company=data.get('company', ''),
+        user_id=uid, user_name=uname,
+        channels=channels,
+        outcome=data.get('outcome', ''),
+        note=data.get('note', ''),
+        next_followup=data.get('next_followup', ''),
+    )
+    if not aid:
+        return jsonify({'error': 'Could not log activity'}), 400
+    # Optionally advance the job's status to reflect the outcome, so the board
+    # and the activity log stay in agreement.
+    outcome = (data.get('outcome') or '').strip().lower()
+    status_map = {'reply_received': 'replied', 'drive_scheduled': 'drive_scheduled',
+                  'not_interested': 'not_interested'}
+    jid = data.get('job_id', '')
+    if jid:
+        update_job(jid, 'status', status_map.get(outcome, 'contacted'))
+    return jsonify({'success': True, 'id': aid})
+
+@app.route('/api/jobs/<job_id>/activities')
+def job_activities(job_id):
+    return jsonify({'activities': get_activities_for_job(job_id)})
+
+# ── Leaderboard (CRM Phase 3 — admin only) ────────────────────────────────────
+@app.route('/api/leaderboard')
+@auth.admin_required
+def leaderboard():
+    rng = request.args.get('range', 'all')     # 'week' or 'all'
+    since = None
+    if rng == 'week':
+        since = (datetime.now() - timedelta(days=7)).isoformat()
+    data = get_leaderboard(since_iso=since)
+    return jsonify(data)
+
+# ── Pipeline / Kanban (CRM) ───────────────────────────────────────────────────
+@app.route('/api/pipeline')
+def pipeline():
+    """Kanban cards grouped by stage. `mine=1` filters to the caller's cards."""
+    assigned = None
+    if request.args.get('mine') == '1':
+        u = auth.current_user()
+        assigned = u['_id'] if u else 'dev'
+    return jsonify(get_pipeline(assigned_to=assigned,
+                                search=request.args.get('search', '').strip()))
+
+@app.route('/api/jobs/<job_id>/stage', methods=['POST'])
+def move_stage(job_id):
+    """Move a card to a new column → maps to a status, logs the move as activity."""
+    stage = (request.json or {}).get('stage', '')
+    if stage not in STAGE_TO_STATUS:
+        return jsonify({'error': 'Invalid stage'}), 400
+    allowed, err = _can_edit_job(job_id)     # owner or admin only
+    if not allowed:
+        return err
+    update_job(job_id, 'status', STAGE_TO_STATUS[stage])
+    # Record the move so the leaderboard reflects pipeline progress. Only the
+    # meaningful outcome stages score; a note-channel row keeps it out of
+    # call/email tallies while still crediting the outcome.
+    outcome_map = {'interested': 'interested', 'drive_scheduled': 'drive_scheduled',
+                   'closed_won': 'drive_scheduled', 'closed_lost': 'not_interested'}
+    if stage in outcome_map:
+        uid, uname = _acting_user()
+        label = {'closed_won': 'Closed — Won', 'closed_lost': 'Closed — Lost'}.get(
+            stage, stage.replace('_', ' ').title())
+        log_activity(job_id=job_id, company=(request.json or {}).get('company', ''),
+                     user_id=uid, user_name=uname, channel='note',
+                     outcome=outcome_map[stage], note=f'Moved to {label}')
+    return jsonify({'success': True})
+
+@app.route('/api/jobs/<job_id>/assign', methods=['POST'])
+@auth.admin_required
+def assign(job_id):
+    """Assign a company card to a committee member (or clear it). Admin only —
+    reassigning ownership is a manager action, not something members self-serve."""
+    _, exists = get_job_owner(job_id)
+    if not exists:
+        return jsonify({'error': 'Company not found'}), 404
+    uid = (request.json or {}).get('user_id', '')
+    name = ''
+    if uid:
+        u = get_user_by_id(uid)
+        if not u:
+            return jsonify({'error': 'Unknown user'}), 400
+        name = u.get('name') or u.get('email')
+    assign_job(job_id, uid, name)
+    return jsonify({'success': True, 'assigned_name': name})
+
+@app.route('/api/jobs/<job_id>/remarks', methods=['POST'])
+def remarks(job_id):
+    allowed, err = _can_edit_job(job_id)     # owner or admin only
+    if not allowed:
+        return err
+    set_job_remarks(job_id, (request.json or {}).get('remarks', ''))
+    return jsonify({'success': True})
 
 # ── Follow-ups ────────────────────────────────────────────────────────────────
 @app.route('/api/outreach/followups')

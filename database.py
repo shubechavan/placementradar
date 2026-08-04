@@ -39,6 +39,37 @@ if not MONGO_URI:
 _client = None
 _db     = None
 
+# ── Auth / users connection ───────────────────────────────────────────────────
+# User login accounts live in a SEPARATE database (default name 'signup') so
+# login data is isolated from scraped job data. If AUTH_MONGO_URI is unset we
+# fall back to the main MONGO_URI — so existing single-DB setups keep working
+# unchanged (users then live in whatever db MONGO_URI names).
+AUTH_MONGO_URI = os.environ.get('AUTH_MONGO_URI', '') or MONGO_URI
+_auth_client = None
+_auth_db     = None
+
+# Default database name if the URI doesn't specify one. Kept as 'jobs' so the
+# existing production database is unchanged.
+_DEFAULT_DB_NAME = 'jobs'
+
+def _db_name_from_uri(uri):
+    """Extract the database name from a MongoDB URI's path, if present.
+
+    Previously this module hardcoded _client['jobs'], which IGNORED the database
+    named in the URI — so pointing MONGO_URI at a '..../jobs_authtest' test DB
+    silently still used the real 'jobs' database. That caused real data loss.
+    Honouring the URI's db name makes test databases actually isolated.
+
+    Parsed with a plain regex (no pymongo.parse_uri) because parse_uri performs a
+    live DNS lookup for mongodb+srv:// URIs, which would fail offline/in tests.
+    """
+    # Grab the path segment between the host's first '/' and the '?' query, e.g.
+    # mongodb+srv://user:pass@host/<dbname>?opts  ->  <dbname>
+    m = re.search(r'^mongodb(?:\+srv)?://[^/]+/([^/?]+)', uri.strip(), re.I)
+    if m and m.group(1):
+        return m.group(1)
+    return _DEFAULT_DB_NAME
+
 def _get_db():
     global _client, _db
     if _db is not None:
@@ -46,13 +77,43 @@ def _get_db():
     try:
         _client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=10000)
         _client.admin.command('ping')
-        _db = _client['jobs']
+        _db = _client[_db_name_from_uri(MONGO_URI)]   # honour the URI's db name
         _ensure_indexes(_db)
-        print('[MongoDB] Connected OK')
+        print(f'[MongoDB] Connected OK  (database: {_db.name})')
     except (ConnectionFailure, ServerSelectionTimeoutError) as e:
         print(f'[MongoDB] Connection failed: {e}')
         raise
     return _db
+
+
+def _get_auth_db():
+    """Connection for the users/login database (default 'signup').
+
+    Reuses the main client when AUTH_MONGO_URI == MONGO_URI (same cluster) so we
+    don't open a redundant pool; otherwise opens its own. Ensures the unique
+    email index exists on whichever database users live in.
+    """
+    global _auth_client, _auth_db
+    if _auth_db is not None:
+        return _auth_db
+    if AUTH_MONGO_URI == MONGO_URI:
+        # Same cluster/URI — reuse the main client, just select the auth db name.
+        _get_db()  # ensures _client is connected
+        _auth_client = _client
+    else:
+        try:
+            _auth_client = MongoClient(AUTH_MONGO_URI, serverSelectionTimeoutMS=10000)
+            _auth_client.admin.command('ping')
+        except (ConnectionFailure, ServerSelectionTimeoutError) as e:
+            print(f'[MongoDB/auth] Connection failed: {e}')
+            raise
+    _auth_db = _auth_client[_db_name_from_uri(AUTH_MONGO_URI)]
+    try:
+        _auth_db.users.create_index('email', unique=True)
+    except Exception:
+        pass
+    print(f'[MongoDB] Auth/users database: {_auth_db.name}')
+    return _auth_db
 
 
 
@@ -79,6 +140,67 @@ def _ensure_indexes(db):
         db.hr_contacts.create_index('hr_email', unique=True)
     except Exception:
         pass
+    try:
+        db.users.create_index('email', unique=True)
+    except Exception:
+        pass
+    db.activities.create_index([('created_at', -1)])
+    db.activities.create_index('user_id')
+    db.activities.create_index('job_id')
+
+
+# ── Users (CRM Phase 1 — team accounts) ───────────────────────────────────────
+# Passwords are stored ONLY as PBKDF2 hashes (werkzeug). Plaintext never touches
+# the database. Email is the unique login key and is always lower-cased.
+def create_user(name, email, password_hash, role='member'):
+    """Insert a new user. Returns the new user's id, or None if the email exists."""
+    from pymongo.errors import DuplicateKeyError
+    email = (email or '').strip().lower()
+    if not email or not password_hash:
+        return None
+    uid = str(uuid.uuid4())
+    try:
+        _get_auth_db().users.insert_one({
+            '_id':        uid,
+            'name':       (name or '').strip() or email,
+            'email':      email,
+            'password':   password_hash,     # PBKDF2 hash, never plaintext
+            'role':       role if role in ('admin', 'member') else 'member',
+            'active':     True,
+            'created_at': datetime.now().isoformat(),
+        })
+        return uid
+    except DuplicateKeyError:
+        return None
+
+
+def get_user_by_email(email):
+    return _get_auth_db().users.find_one({'email': (email or '').strip().lower()})
+
+
+def get_user_by_id(uid):
+    return _get_auth_db().users.find_one({'_id': uid})
+
+
+def count_users():
+    return _get_auth_db().users.count_documents({})
+
+
+def list_users():
+    """All users without password hashes — safe to send to the admin panel."""
+    out = []
+    for u in _get_auth_db().users.find({}, {'password': 0}).sort('created_at', 1):
+        u['id'] = str(u.pop('_id'))
+        out.append(_sanitize_doc(u))
+    return out
+
+
+def set_user_active(uid, active):
+    _get_auth_db().users.update_one({'_id': uid}, {'$set': {'active': bool(active)}})
+
+
+def delete_user(uid):
+    _get_auth_db().users.delete_one({'_id': uid})
 
 
 def init_db():
@@ -300,6 +422,93 @@ def update_job(job_id, field, value):
     _get_db().jobs.update_one({'_id': job_id}, {'$set': {field: value}})
 
 
+def get_job_owner(job_id):
+    """Return (assigned_to, exists) for a job — used for ownership checks."""
+    j = _get_db().jobs.find_one({'_id': job_id}, {'assigned_to': 1})
+    if not j:
+        return None, False
+    return (j.get('assigned_to') or ''), True
+
+
+# ── Pipeline / Kanban (CRM) ───────────────────────────────────────────────────
+# The 5 board columns map onto the existing `status` values, so no migration is
+# needed and the board stays in sync with the job table's status column.
+# 6 columns. "Closed" is split into Won vs Lost so a company that HIRED (won) is
+# never mislabelled as rejected — the two terminal outcomes are tracked apart,
+# which is standard CRM practice and keeps the sir's placement numbers honest.
+#   Closed–Won  -> status 'placed'   (they will hire / agreed to a drive outcome)
+#   Closed–Lost -> status 'rejected' (declined) — also shows legacy 'not_interested'
+PIPELINE_STAGES = {
+    'to_contact':      ['new'],
+    'contacted':       ['contacted'],
+    'interested':      ['replied'],
+    'drive_scheduled': ['drive_scheduled'],
+    'closed_won':      ['placed'],
+    'closed_lost':     ['rejected', 'not_interested'],
+}
+# When a card is dropped into a column, this is the status it gets written as.
+STAGE_TO_STATUS = {
+    'to_contact': 'new', 'contacted': 'contacted', 'interested': 'replied',
+    'drive_scheduled': 'drive_scheduled',
+    'closed_won': 'placed', 'closed_lost': 'rejected',
+}
+_HAS_CONTACT = {'$or': [
+    {'phone':  {'$nin': ['', 'nan', None]}},
+    {'emails': {'$nin': ['', 'nan', None]}},
+]}
+
+def get_pipeline(assigned_to=None, search='', first_limit=40):
+    """Return cards grouped by stage.
+
+    Only companies that have a contact appear. The 'to_contact' column is capped
+    at `first_limit` (with a total count so the UI can show "+N more"); the
+    working columns return in full since they only hold active cards.
+    """
+    db = _get_db()
+    proj = {'company': 1, 'title': 1, 'location': 1, 'phone': 1, 'emails': 1,
+            'hr_contact': 1, 'company_url': 1, 'status': 1, 'notes': 1,
+            'assigned_to': 1, 'assigned_name': 1, 'created_at': 1}
+    base = dict(_HAS_CONTACT)
+    and_clauses = [_HAS_CONTACT]
+    if assigned_to:
+        and_clauses.append({'assigned_to': assigned_to})
+    if search:
+        s = re.escape(search)
+        and_clauses.append({'$or': [
+            {'company':  {'$regex': s, '$options': 'i'}},
+            {'title':    {'$regex': s, '$options': 'i'}},
+            {'location': {'$regex': s, '$options': 'i'}},
+        ]})
+    query = {'$and': and_clauses} if len(and_clauses) > 1 else _HAS_CONTACT
+
+    out = {stage: [] for stage in PIPELINE_STAGES}
+    counts = {}
+    for stage, statuses in PIPELINE_STAGES.items():
+        q = dict(query)
+        q['status'] = {'$in': statuses}
+        total = db.jobs.count_documents(q)
+        counts[stage] = total
+        cur = db.jobs.find(q, proj).sort('created_at', -1)
+        if stage == 'to_contact':
+            cur = cur.limit(first_limit)     # cap the big column
+        for r in cur:
+            r['id'] = str(r.pop('_id'))
+            out[stage].append(_sanitize_doc(r))
+    return {'columns': out, 'counts': counts}
+
+
+def assign_job(job_id, user_id, user_name):
+    """Set (or clear) the committee member who owns a company card."""
+    _get_db().jobs.update_one(
+        {'_id': job_id},
+        {'$set': {'assigned_to': user_id or '', 'assigned_name': _clean(user_name)}})
+
+
+def set_job_remarks(job_id, remarks):
+    _get_db().jobs.update_one(
+        {'_id': job_id}, {'$set': {'notes': _clean(remarks)[:2000]}})
+
+
 def get_jobs_without_contacts(limit=200):
     """Return jobs that have no email and no phone, including description for enrichment."""
     db = _get_db()
@@ -352,6 +561,139 @@ def get_dashboard_stats():
                                  db.jobs.aggregate([{'$group': {'_id': '$company', 'count': {'$sum': 1}}},
                                                     {'$sort': {'count': -1}}, {'$limit': 10}])]
     return stats
+
+
+# ── Activities (CRM Phase 2 — who did what) ───────────────────────────────────
+# Every touch a committee member makes on a company is one activity row, stamped
+# with the logged-in user. The leaderboard is a pure aggregation over this table,
+# so counts can never drift from the underlying log.
+VALID_CHANNELS = {'call', 'email', 'whatsapp', 'note'}
+VALID_OUTCOMES = {'interested', 'not_interested', 'callback', 'no_answer',
+                  'reply_received', 'drive_scheduled', 'contacted', ''}
+
+def log_activity(job_id, company, user_id, user_name, channel=None,
+                 outcome='', note='', next_followup='', channels=None):
+    """Insert ONE activity that may span multiple channels (e.g. call + email).
+
+    Accepts either `channel` (single, legacy) or `channels` (list). Stored as a
+    normalised `channels` list; `channel` is kept as the first one for backward
+    compatibility with older rows and simple queries. Counts as one touch — the
+    leaderboard credits each channel present, but the row is a single activity.
+    """
+    # Normalise inputs into a de-duplicated, validated channel list.
+    raw = list(channels) if channels else ([channel] if channel else [])
+    chans = []
+    for c in raw:
+        c = (c or '').strip().lower()
+        if c in VALID_CHANNELS and c not in chans:
+            chans.append(c)
+    if not chans:
+        return None
+    outcome = (outcome or '').strip().lower()
+    if outcome not in VALID_OUTCOMES:
+        outcome = ''
+    aid = str(uuid.uuid4())
+    _get_db().activities.insert_one({
+        '_id':           aid,
+        'job_id':        job_id or '',
+        'company':       _clean(company),
+        'user_id':       user_id or '',
+        'user_name':     _clean(user_name),
+        'channels':      chans,        # multi-channel list
+        'channel':       chans[0],     # legacy single field (first channel)
+        'outcome':       outcome,
+        'note':          _clean(note)[:1000],
+        'next_followup': _clean(next_followup),
+        'created_at':    datetime.now().isoformat(),
+    })
+    return aid
+
+
+def get_activities_for_job(job_id):
+    """Full activity timeline for one company, newest first."""
+    out = []
+    for a in _get_db().activities.find({'job_id': job_id}).sort('created_at', -1):
+        a['id'] = str(a.pop('_id'))
+        out.append(_sanitize_doc(a))
+    return out
+
+
+# Scoring weights — results are worth more than raw activity. Kept in one place
+# so the leaderboard and the UI legend never disagree.
+LEADERBOARD_WEIGHTS = {
+    'reply_received':  5,
+    'drive_scheduled': 5,
+    'interested':      3,
+    'call':            1,   # per logged call
+    'email':           1,   # per logged email
+    'whatsapp':        1,   # per logged whatsapp
+    'company':         2,   # per distinct company touched
+}
+
+def get_leaderboard(since_iso=None):
+    """Per-user activity breakdown + weighted score.
+
+    since_iso: ISO timestamp lower bound (for the weekly view), or None = all-time.
+    Returns a list of member rows sorted by score, plus the weights used.
+    Only counts users that still exist (a deleted member drops off).
+    """
+    db = _get_db()
+    match = {} if not since_iso else {'created_at': {'$gte': since_iso}}
+
+    # 1) channel + outcome counts per user.
+    # A channel counts if it is PRESENT in the activity's channels array, so a
+    # single call+email activity credits both Calls and Emails — but `total`
+    # increments once (one touch). `_ch` normalises legacy rows (that only had a
+    # scalar `channel`) into an array so both shapes aggregate the same way.
+    rows = db.activities.aggregate([
+        {'$match': match},
+        {'$addFields': {'_ch': {'$ifNull': ['$channels', ['$channel']]}}},
+        {'$group': {
+            '_id': '$user_id',
+            'user_name': {'$last': '$user_name'},
+            'calls':     {'$sum': {'$cond': [{'$in': ['call',     '$_ch']}, 1, 0]}},
+            'emails':    {'$sum': {'$cond': [{'$in': ['email',    '$_ch']}, 1, 0]}},
+            'whatsapps': {'$sum': {'$cond': [{'$in': ['whatsapp', '$_ch']}, 1, 0]}},
+            'replies':   {'$sum': {'$cond': [{'$eq': ['$outcome', 'reply_received']}, 1, 0]}},
+            'drives':    {'$sum': {'$cond': [{'$eq': ['$outcome', 'drive_scheduled']}, 1, 0]}},
+            'interested':{'$sum': {'$cond': [{'$eq': ['$outcome', 'interested']}, 1, 0]}},
+            'total':     {'$sum': 1},
+            'companies_set': {'$addToSet': '$job_id'},
+        }},
+    ])
+    by_user = {}
+    for r in rows:
+        uid = r['_id']
+        if not uid:
+            continue
+        companies = len([c for c in (r.get('companies_set') or []) if c])
+        w = LEADERBOARD_WEIGHTS
+        score = (r['replies'] * w['reply_received'] + r['drives'] * w['drive_scheduled']
+                 + r['interested'] * w['interested'] + r['calls'] * w['call']
+                 + r['emails'] * w['email'] + r['whatsapps'] * w['whatsapp']
+                 + companies * w['company'])
+        by_user[uid] = {
+            'user_id': uid, 'user_name': r.get('user_name') or '—',
+            'calls': r['calls'], 'emails': r['emails'], 'whatsapps': r['whatsapps'],
+            'companies': companies, 'replies': r['replies'], 'drives': r['drives'],
+            'interested': r['interested'], 'total': r['total'], 'score': score,
+        }
+
+    # 2) include active members with zero activity so the sir sees everyone.
+    # Users live in the auth db (may differ from the jobs db), so read from there.
+    for u in _get_auth_db().users.find({'active': True}, {'password': 0}):
+        uid = str(u['_id'])
+        if uid not in by_user:
+            by_user[uid] = {
+                'user_id': uid, 'user_name': u.get('name') or u.get('email'),
+                'calls': 0, 'emails': 0, 'whatsapps': 0, 'companies': 0,
+                'replies': 0, 'drives': 0, 'interested': 0, 'total': 0, 'score': 0,
+            }
+        elif by_user[uid]['user_name'] in ('—', '', None):
+            by_user[uid]['user_name'] = u.get('name') or u.get('email')
+
+    board = sorted(by_user.values(), key=lambda x: (-x['score'], -x['companies'], x['user_name']))
+    return {'board': board, 'weights': LEADERBOARD_WEIGHTS}
 
 
 # ── Outreach ──────────────────────────────────────────────────────────────────

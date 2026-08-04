@@ -87,7 +87,12 @@ def scrape_jobs(params, progress_callback=None):
     results_wanted = int(params.get('results_wanted', 30))
     tech_only   = params.get('tech_only', False)
 
-    google_jobs_on   = 'google_jobs' in sites
+    # google_jobs PAUSED: its fallback path returns aggregator landing pages
+    # ("29811 Data Analyst Jobs - Naukri") with no company/contact — pure noise.
+    # The scrape_google_jobs() function is kept intact; it's just not run.
+    # To re-enable, change this line back to: 'google_jobs' in sites
+    GOOGLE_JOBS_PAUSED = True
+    google_jobs_on   = ('google_jobs' in sites) and not GOOGLE_JOBS_PAUSED
     DEDICATED_SITES  = {'remotive','remoteok','weworkremotely','himalayas','wellfound','yc_startup','builtin','remoteco','toptal','contra','flexjobs','hn_hiring','turing','upwork'}
     jobspy_sites     = [s for s in sites if s in JOBSPY_SITES]
     dedicated_sites  = [s for s in sites if s in DEDICATED_SITES]

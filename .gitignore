@@ -10,6 +10,7 @@ restored data/
 # One-off local recovery scripts (kept locally, not shipped)
 restore_from_csv.py
 rebuild_data.py
+create_crm_users.py
 
 # Python
 __pycache__/
