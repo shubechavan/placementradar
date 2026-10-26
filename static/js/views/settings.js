@@ -1,5 +1,5 @@
 // Settings: integrations first, then college details. Templates live on Email outreach.
-import { html, useState, useEffect, api, toast } from '../lib.js';
+import { html, useState, useEffect, api, toast, FEATURES } from '../lib.js';
 import { ErrorLine } from '../ui.js';
 
 const SOURCES = [
@@ -77,14 +77,14 @@ export function Settings({ user }) {
     ${!isAdmin && html`<p className="lede">Only admins can change settings. Ask the placement head if something here is wrong.</p>`}
     ${error ? html`<${ErrorLine} message=${'Settings didn’t load. ' + error} onRetry=${load} />` : !s ? html`<div className="skeleton-row"></div>` : html`
     <form onSubmit=${save} noValidate>
-      <section className="section settings-sec">
+      ${FEATURES.emailOutreach && html`<section className="section settings-sec">
         <div className="section-head"><h2>Gmail for outreach</h2><span className="why">sends cold emails and follow-ups</span></div>
         <div className="settings-grid">
           ${field('gmail_email', 'Gmail address', { type: 'email', ph: 'placement@kjsim.edu.in' })}
           ${field('gmail_app_password', 'App password', { type: 'password', ph: 'xxxx xxxx xxxx xxxx', hint: html`Not your normal Gmail password. <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener noreferrer">Create an app password</a>. Some servers only accept it as an environment variable; you’ll be told if so.` })}
         </div>
         ${isAdmin && html`<button type="button" className="btn btn-sm" onClick=${testGmail} disabled=${testing || !s.gmail_email}>${testing ? 'Testing…' : 'Test Gmail'}</button>`}
-      </section>
+      </section>`}
       <section className="section settings-sec">
         <div className="section-head"><h2>Google Jobs search</h2><span className="why">2,500 free searches a month</span></div>
         <div className="settings-grid">
@@ -98,7 +98,7 @@ export function Settings({ user }) {
           ${field('committee_name', 'Committee name', { ph: 'Training and Placement Cell' })}
           ${field('committee_email', 'Committee email', { type: 'email', ph: 'placement@kjsim.edu.in' })}
         </div>
-        <p className="muted">Email templates are edited on <a href="#/outreach">Email outreach</a>.</p>
+        ${FEATURES.emailOutreach && html`<p className="muted">Email templates are edited on <a href="#/outreach">Email outreach</a>.</p>`}
       </section>
       ${isAdmin && html`<div className="save-bar">
         <button type="submit" className="btn btn-primary" disabled=${busy || !dirty}>${busy ? 'Saving…' : 'Save settings'}</button>

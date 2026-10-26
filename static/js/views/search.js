@@ -1,5 +1,5 @@
 // Job search: run a scrape across job boards. Every job found is saved to the Job board.
-import { html, useState, useEffect, useRef, api, toast, grade, phones, primaryEmail, telHref, mailHref, plural, shortDate } from '../lib.js';
+import { html, useState, useEffect, useRef, api, toast, grade, phones, primaryEmail, telHref, mailHref, plural, shortDate, FEATURES } from '../lib.js';
 import { Icon, Grade, Avatar, Empty } from '../ui.js';
 import { siteName } from './board.js';
 
@@ -104,7 +104,7 @@ export function JobSearch() {
             <span><span className="source-name">${siteName(s)}</span>${note && html`<span className="source-note">${note}</span>`}</span></label>`)}
         </fieldset>`)}
       </div>
-      ${customCount > 0 && html`<p className="muted">Your ${plural(customCount, 'custom site')} from Custom sites ${customCount === 1 ? 'is' : 'are'} included automatically.</p>`}
+      ${FEATURES.customSites && customCount > 0 && html`<p className="muted">Your ${plural(customCount, 'custom site')} from Custom sites ${customCount === 1 ? 'is' : 'are'} included automatically.</p>`}
 
       <div className="form-foot">
         <label className="inline-check"><input type="checkbox" className="check" checked=${form.contacts} onChange=${upd('contacts')} />Find phone numbers and emails for each company</label>

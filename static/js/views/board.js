@@ -2,7 +2,7 @@
 import {
   html, useState, useEffect, useMemo, useCallback, api, toast, grade, GRADE_ORDER, GRADE_HELP,
   STATUSES, statusLabel, phones, emails, primaryEmail, hasContact, telHref, mailHref, safeUrl,
-  shortDate, dateTime, plural, copyText, OUTCOME_LABEL, CHANNEL_LABEL,
+  shortDate, dateTime, plural, copyText, OUTCOME_LABEL, CHANNEL_LABEL, FEATURES,
 } from '../lib.js';
 import { Icon, Grade, StatusSelect, Avatar, Panel, Confirm, LogOutcome, Empty, ErrorLine } from '../ui.js';
 
@@ -178,7 +178,7 @@ export function Board({ user, params, setParams }) {
 
     ${sel.size ? html`<div className="bulkbar" role="region" aria-label="Selection actions">
         <b>${plural(sel.size, 'selected', 'selected')}</b>
-        <button type="button" className="btn btn-primary btn-sm" onClick=${() => askEmail(selected)}><${Icon} name="mail" size=${16} />Send email</button>
+        ${FEATURES.emailOutreach && html`<button type="button" className="btn btn-primary btn-sm" onClick=${() => askEmail(selected)}><${Icon} name="mail" size=${16} />Send email</button>`}
         <button type="button" className="btn btn-sm" onClick=${() => copyAll('phone')}>Copy phones</button>
         <button type="button" className="btn btn-sm" onClick=${() => copyAll('email')}>Copy emails</button>
         <button type="button" className="btn btn-sm" onClick=${exportSelected}>Export selected</button>
@@ -278,7 +278,7 @@ function JobPanel({ job, onClose, onStatus, onLog, onEmail, onPatched }) {
     <div className="panel-actions">
       ${ph[0] && telHref(ph[0]) && html`<a className="btn btn-primary" href=${telHref(ph[0])}><${Icon} name="phone" size=${16} />Call</a>`}
       <button type="button" className="btn" onClick=${onLog}>Log outcome</button>
-      ${primaryEmail(job) && html`<button type="button" className="btn" onClick=${onEmail}><${Icon} name="mail" size=${16} />Send email</button>`}
+      ${FEATURES.emailOutreach && primaryEmail(job) && html`<button type="button" className="btn" onClick=${onEmail}><${Icon} name="mail" size=${16} />Send email</button>`}
       ${url && html`<a className="btn btn-quiet" href=${url} target="_blank" rel="noopener noreferrer"><${Icon} name="external" size=${16} />Job posting</a>`}
     </div>
     <dl className="facts">

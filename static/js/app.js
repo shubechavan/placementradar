@@ -1,5 +1,5 @@
 // App shell: sign-in gate, rail / drawer navigation, hash router.
-import { html, useState, useEffect, api, authEvents } from './lib.js';
+import { html, useState, useEffect, api, authEvents, FEATURES } from './lib.js';
 import { Icon, Toasts } from './ui.js';
 import { Today } from './views/today.js';
 import { Board } from './views/board.js';
@@ -19,18 +19,19 @@ const NAV = [
     { id: 'pipeline', label: 'Pipeline', icon: 'pipeline' },
   ] },
   { group: 'Outreach', items: [
-    { id: 'outreach', label: 'Email outreach', icon: 'mail' },
+    { id: 'outreach', label: 'Email outreach', icon: 'mail', feature: 'emailOutreach' },
     { id: 'hr', label: 'HR database', icon: 'book' },
   ] },
   { group: 'Setup', items: [
-    { id: 'sites', label: 'Custom sites', icon: 'globe' },
+    { id: 'sites', label: 'Custom sites', icon: 'globe', feature: 'customSites' },
     { id: 'settings', label: 'Settings', icon: 'settings' },
   ] },
   { group: 'Admin', admin: true, items: [
     { id: 'leaderboard', label: 'Leaderboard', icon: 'chart' },
     { id: 'members', label: 'Members', icon: 'users' },
   ] },
-];
+// A hidden feature leaves the menu and its links: an unknown route falls back to Today.
+].map((g) => ({ ...g, items: g.items.filter((i) => !i.feature || FEATURES[i.feature]) }));
 const LABELS = Object.fromEntries(NAV.flatMap((g) => g.items.map((i) => [i.id, i.label])));
 
 // ── Router: #/view?key=value. Links push history; filters replace it. ──

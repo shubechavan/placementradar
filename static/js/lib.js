@@ -4,6 +4,12 @@ const { useState, useEffect, useMemo, useRef, useCallback, Fragment } = React;
 export const html = htm.bind(React.createElement);
 export { useState, useEffect, useMemo, useRef, useCallback, Fragment };
 
+// ── Features hidden from the interface ───────────────────────────────────
+// Hidden for the 27 Oct 2026 presentation: sending email needs a Gmail app password the
+// live site doesn't have, and custom sites need CSS selectors to set up. Their code, data
+// and server routes are untouched; set a flag back to true to bring that feature back.
+export const FEATURES = { emailOutreach: false, customSites: false };
+
 // ── API ──────────────────────────────────────────────────────────────────
 // Every call goes through here so a 401 (session expired) sends the user back
 // to the sign-in screen instead of failing silently.

@@ -1,7 +1,7 @@
 // Today: the call sheet. Three ruled lists, each row ends in an action.
 import {
   html, useState, useEffect, useCallback, api, toast, grade, GRADE_ORDER, phones, primaryEmail,
-  mailHref, daysSince, ago, plural, loggedToday,
+  mailHref, daysSince, ago, plural, loggedToday, FEATURES,
 } from '../lib.js';
 import { Icon, Grade, Status, Avatar, PhoneLinks, LogOutcome, Confirm, Empty, ErrorLine } from '../ui.js';
 
@@ -15,7 +15,7 @@ function useToday() {
     setState((s) => ({ ...s, loading: true, error: '' }));
     try {
       const [fu, mine] = await Promise.all([
-        api.get(`/api/outreach/followups?days=${FOLLOWUP_DAYS}`),
+        FEATURES.emailOutreach ? api.get(`/api/outreach/followups?days=${FOLLOWUP_DAYS}`) : Promise.resolve({ followups: [] }),
         api.get('/api/pipeline?mine=1'),
       ]);
       let pipe = mine, scope = 'mine';
@@ -111,7 +111,7 @@ export function Today({ user }) {
     ${s.error ? html`<${ErrorLine} message=${'Today’s list didn’t load. ' + s.error} onRetry=${reload} />` : s.loading && !s.callNext
       ? html`<div aria-busy="true" aria-label="Loading today’s list">${[0, 1, 2, 3].map((i) => html`<div key=${i} className="skeleton-row"></div>`)}</div>`
       : html`
-    <section className="section" aria-labelledby="fu-h">
+    ${FEATURES.emailOutreach && html`<section className="section" aria-labelledby="fu-h">
       <${SectionHead} title=${html`<span id="fu-h">Follow-ups due</span>`} count=${s.followups.length}
         why=${s.followups.length ? `emailed ${FOLLOWUP_DAYS}+ days ago, no reply yet` : null}>
         ${s.followups.length > 0 && html`<button type="button" className="btn btn-primary btn-sm" onClick=${() => setConfirmFU(true)}>Send follow-ups</button>`}
@@ -122,7 +122,7 @@ export function Today({ user }) {
           when=${`emailed ${ago(r.last_sent)}${r.sends > 1 ? `, ${r.sends - 1} follow-up sent` : ''}`}
           onLog=${setLogFor} />`)}</ul>`
         : html`<${Empty} title="No follow-ups due.">Companies you emailed ${FOLLOWUP_DAYS} or more days ago that haven’t replied show up here.</${Empty}>`}
-    </section>
+    </section>`}
 
     <section className="section" aria-labelledby="cn-h">
       <${SectionHead} title=${html`<span id="cn-h">Call next</span>`} count=${s.callNext.length}
