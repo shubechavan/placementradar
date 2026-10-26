@@ -1,6 +1,15 @@
 """
 app.py — PlacementRadar v4 Flask backend
 """
+# Load .env before `database` is imported: it reads MONGO_URI at import time.
+# Real environment variables win (override=False). Production sets its variables
+# directly, so a missing python-dotenv is not an error.
+try:
+    from dotenv import load_dotenv
+    load_dotenv(override=False)
+except ImportError:
+    pass
+
 from flask import Flask, render_template, request, jsonify, send_file
 import threading, uuid, io, os, json
 import requests as _req
@@ -19,6 +28,7 @@ from database import (init_db, get_settings, save_settings, save_search,
                       get_pipeline, assign_job, set_job_remarks,
                       STAGE_TO_STATUS, get_user_by_id, get_job_owner)
 import auth
+import rate_limit
 from datetime import datetime, timedelta
 
 app = Flask(__name__)
@@ -67,12 +77,33 @@ def auth_login():
     data = request.json or {}
     email = (data.get('email') or '').strip().lower()
     password = data.get('password') or ''
+
+    # Throttle BEFORE the password hash (Phase H). PBKDF2 is deliberately slow, so an
+    # unthrottled login endpoint is both a brute-force target and a DoS amplifier —
+    # checking after the hash would close the first hole and leave the second wide open.
+    keys = rate_limit.login_keys(request, email)
+    allowed, retry_after = rate_limit.check(keys)
+    if not allowed:
+        resp = jsonify({'error': 'Too many login attempts. Try again shortly.'})
+        resp.headers['Retry-After'] = str(retry_after)
+        return resp, 429
+
     user = get_user_by_email(email)
-    # Verify even when the user is missing? We short-circuit but return the same
-    # generic message either way so we don't reveal which emails exist.
-    if not user or not user.get('active', True) or \
-            not auth.verify_password(user.get('password', ''), password):
+    # Same generic message whether the email exists or not — and the same WORK.
+    # Short-circuiting on a missing user returned instantly while a real user paid for
+    # a full PBKDF2 round, which turned response time into a user-enumeration oracle.
+    # Hashing against a dummy on the miss path keeps the two indistinguishable.
+    if user and user.get('active', True):
+        ok = auth.verify_password(user.get('password', ''), password)
+    else:
+        auth.verify_password(auth.DUMMY_PASSWORD_HASH, password)
+        ok = False
+
+    if not ok:
+        rate_limit.record_failure(keys)
         return jsonify({'error': 'Invalid email or password'}), 401
+
+    rate_limit.clear(keys)      # a legitimate sign-in must not spend the budget
     auth.login_user(user)
     return jsonify({'user': {'name': user.get('name'), 'email': user['email'],
                              'role': user.get('role', 'member')}})
@@ -202,14 +233,80 @@ def api_get_settings():
 @app.route('/api/settings', methods=['POST'])
 @auth.admin_required
 def api_save_settings():
-    # Admin only — writing settings can change Gmail creds, API keys, templates.
+    # Admin only — writing settings can change API keys and templates.
     data = request.json or {}
     # Don't overwrite secrets with their masked placeholder
     for key in SECRET_SETTINGS:
         if data.get(key) == '••••••••':
             data.pop(key)
+    # Env-only credentials are dropped by save_settings() regardless; report it back
+    # so an admin who typed a password into the form is told it was NOT stored,
+    # rather than believing it was saved and silently having no working credential.
+    from database import SECRET_ENV_ONLY
+    ignored = sorted(k for k in data if k in SECRET_ENV_ONLY)
     save_settings(data)
-    return jsonify({'success': True})
+    resp = {'success': True}
+    if ignored:
+        resp['ignored'] = ignored
+        resp['message'] = ('These are environment-only credentials and were not saved '
+                           'to the database. Set them as environment variables: '
+                           + ', '.join(SECRET_ENV_ONLY[k] for k in ignored))
+    return jsonify(resp)
+
+@app.route('/api/source-health')
+@auth.admin_required
+def api_source_health():
+    """Per-source health (brief §G): "I want to see a source die the day it dies."
+
+    Admin-only — it exposes which scrapers are being blocked, which is operational
+    detail, not committee data.
+
+    Reports EVERY known source, including those at zero. A source that is failing
+    100% of the time must render as a row of zeros, not vanish from the table: a
+    missing row reads as "fine" and that is the exact ambiguity this endpoint exists
+    to remove. `live` counters are this process's in-memory tallies since start;
+    `total` are the cumulative figures persisted in `source_metrics`.
+    """
+    import source_metrics as SM
+    from database import _get_db
+    live = SM.snapshot()
+
+    stored = {}
+    try:
+        db = _get_db()
+        for row in db[SM.COLLECTION].find({}):
+            stored[row['_id']] = {k: v for k, v in row.items() if k != '_id'}
+    except Exception as e:
+        print(f'[source-health] stored metrics unavailable: {type(e).__name__}: {e}')
+
+    rows = []
+    for sid in sorted(set(live) | set(stored) | set(SM.KNOWN_SOURCES)):
+        lv, st = live.get(sid, {}), stored.get(sid, {})
+        attempts = st.get('attempts', 0) or 0
+        successes = st.get('successes', 0) or 0
+        non_200 = sum(v for k, v in st.items()
+                      if k.startswith('http_') and not k[5:].startswith('2'))
+        rows.append({
+            'source_id':      sid,
+            'attempts':       attempts,
+            'successes':      successes,
+            'contacts_found': st.get('contacts_found', 0) or 0,
+            'timeouts':       st.get('timeouts', 0) or 0,
+            'failures':       st.get('failures', 0) or 0,
+            'http_403':       st.get('http_403', 0) or 0,
+            'http_429':       st.get('http_429', 0) or 0,
+            'p50_latency_ms': st.get('p50_latency_ms') or lv.get('p50_latency_ms'),
+            'success_rate':   round(successes / attempts, 3) if attempts else None,
+            'non_200_rate':   round(non_200 / attempts, 3) if attempts else None,
+            # Surfaced as a flag, not buried: a high non-200 rate means this source's
+            # hit rate is measuring blocking, not yield.
+            'blocked':        bool(attempts >= 10 and non_200 / attempts > 0.30),
+            'live_attempts':  lv.get('attempts', 0),
+        })
+    return jsonify({'sources': rows,
+                    'recent_failures': SM.recent_failures(25),
+                    'note': 'sources with zero attempts are listed deliberately'})
+
 
 @app.route('/api/settings/test-smtp', methods=['POST'])
 @auth.admin_required

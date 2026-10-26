@@ -25,11 +25,12 @@
 13. [DevOps — GitHub Actions as Scraper](#13-devops--github-actions-as-scraper)
 14. [Deployment — Render](#14-deployment--render)
 15. [Complete User Journey](#15-complete-user-journey)
-16. [Bugs We Fixed](#16-bugs-we-fixed)
-17. [System Architecture Diagram](#17-system-architecture-diagram)
-18. [Results](#18-results)
-19. [Skills Demonstrated](#19-skills-demonstrated)
-20. [Interview Q&A](#20-interview-qa)
+16. [CRM / Team Workspace](#16-crm--team-workspace)
+17. [Bugs We Fixed](#17-bugs-we-fixed)
+18. [System Architecture Diagram](#18-system-architecture-diagram)
+19. [Results](#19-results)
+20. [Skills Demonstrated](#20-skills-demonstrated)
+21. [Interview Q&A](#21-interview-qa)
 
 ---
 
@@ -44,6 +45,7 @@ PlacementRadar is a full-stack web application that automates the entire campus 
 - v2: Flask web UI added, CSV export
 - v3: MongoDB migration, contact enrichment added
 - v4: Full DevOps pipeline, GitHub Actions scraping offload, production deployment, grade badges, bulk copy
+- v5: Team CRM — logins/roles, a separate auth database, activity logging, Kanban pipeline, and a leaderboard for the placement head
 
 ---
 
@@ -128,8 +130,9 @@ A placement officer's daily workflow:
 ```
 placementradar/
 │
-├── app.py               # Flask app — all 20+ API routes
-├── database.py          # MongoDB layer — all DB reads/writes
+├── app.py               # Flask app — jobs, outreach, and CRM API routes
+├── auth.py              # CRM auth — login/session, role decorators, admin bootstrap
+├── database.py          # MongoDB layer — jobs, contacts, users, activities, pipeline
 ├── job_scraper.py       # Multi-board scraping engine
 ├── contact_finder.py    # 8-source HR contact discovery
 ├── scrape_worker.py     # GitHub Actions entry point
@@ -258,6 +261,62 @@ MongoDB Atlas M0 solves all three.
 }
 ```
 
+#### `users` — CRM Team Accounts *(stored in a separate `signup` database)*
+```json
+{
+  "_id": "uuid-string",
+  "name": "Noel sir",
+  "email": "noel@college.edu",
+  "password": "pbkdf2:sha256:...",   // Werkzeug hash — plaintext never stored
+  "role": "admin",                    // "admin" or "member"
+  "active": true,
+  "created_at": "2026-08-04T21:00:00"
+}
+```
+
+#### `activities` — CRM Outreach Log (who contacted which company)
+```json
+{
+  "_id": "uuid-string",
+  "job_id": "uuid-string",            // which company/lead
+  "user_id": "uuid-string",           // which member did it
+  "user_name": "Aryan Dalvi",
+  "channels": ["call", "email"],      // multi-channel; one entry = one touch
+  "channel": "call",                  // legacy scalar kept for old rows
+  "outcome": "interested",            // contacted | interested | drive_scheduled | reply_received
+  "remarks": "HR asked for the brochure, will call back Tuesday",
+  "created_at": "2026-08-05T11:20:00"
+}
+```
+
+Pipeline ownership and stage are stored on the `jobs` document itself (an `owner`
+field for the assigned member and the existing `status` field, which the Kanban
+stages map onto), so no extra collection is needed for the board.
+
+### Why a Separate `signup` Database for Users
+
+Login accounts live in their own database (`AUTH_MONGO_URI`, e.g. the same Atlas
+cluster with the db name `signup`), while all job and CRM-activity data stays in the
+main `jobs` database. The split is deliberate:
+
+- **Isolation of identity from content** — password hashes and accounts are a
+  different security domain than scraped public job listings. A mistake or export on
+  the jobs side can't touch credentials, and vice-versa.
+- **Falls back gracefully** — `AUTH_MONGO_URI` defaults to `MONGO_URI` when unset, so
+  a simple single-database deployment still works with zero extra config.
+- **Activities stay with jobs** — an activity references a `job_id`, so it lives in
+  the same database as the jobs it points to; only the `users` collection moves.
+
+```python
+# database.py — one client per database, users routed to the auth db
+AUTH_MONGO_URI = os.environ.get('AUTH_MONGO_URI', '') or MONGO_URI
+
+def _get_auth_db():
+    # reuses the main client when the URI is the same cluster; otherwise its own
+    ...
+    return _auth_client[_db_name_from_uri(AUTH_MONGO_URI)]   # e.g. "signup"
+```
+
 ### Key MongoDB Patterns
 
 **Upsert by URL — prevents duplicate jobs:**
@@ -296,6 +355,10 @@ db.jobs.create_index('job_url', sparse=True)
 db.jobs.create_index([('company', 1), ('title', 1)])
 db.jobs.create_index('created_at')
 db.hr_contacts.create_index('hr_email', unique=True)
+db.activities.create_index([('created_at', -1)])   # recent-first activity feed
+db.activities.create_index('user_id')              # leaderboard grouping
+db.activities.create_index('job_id')               # a lead's history
+auth_db.users.create_index('email', unique=True)   # login key (on the signup db)
 ```
 
 ---
@@ -335,6 +398,23 @@ init_db()   # connects MongoDB, creates indexes, seeds default settings
 | DELETE | `/api/custom-sites/<id>` | Remove custom site |
 | POST | `/api/custom-sites/test` | Test a custom site config |
 | GET | `/api/export` | Download CSV (board or search results) |
+| POST | `/api/auth/login` | Log in with email + password, sets the session cookie |
+| POST | `/api/auth/logout` | Clear the session |
+| GET | `/api/auth/me` | Who am I (current user + role), for the UI to gate views |
+| GET / POST | `/api/users` | Admin only — list / create committee members |
+| PATCH / DELETE | `/api/users/<id>` | Admin only — activate/deactivate or remove a member |
+| POST | `/api/activities` | Log an outreach touch (multi-channel, outcome, remarks) |
+| GET | `/api/jobs/<id>/activities` | A single lead's activity history |
+| GET | `/api/leaderboard` | Admin only — weighted per-member scores (week / all-time) |
+| GET | `/api/pipeline` | Kanban board data grouped by stage |
+| POST | `/api/jobs/<id>/stage` | Move a lead to a pipeline stage |
+| POST | `/api/jobs/<id>/assign` | Admin only — assign a lead's owner |
+| POST | `/api/jobs/<id>/remarks` | Save free-text remarks on a lead |
+
+CRM routes are guarded by `auth.login_required` / `auth.admin_required`; the settings
+write routes are admin-only, while the settings read route stays open but masks
+secrets. In local dev (no `SECRET_KEY` set) the guards no-op so the app is usable
+without logging in.
 
 ### Scrape Flow — Dual Path Design
 ```python
@@ -1122,7 +1202,134 @@ Click "Send"         POST /api/outreach/send → Flask → Gmail SMTP
 
 ---
 
-## 16. Bugs We Fixed
+## 16. CRM / Team Workspace
+
+Once more than one person uses the tool, "which companies have we already called?"
+becomes the real problem. Phase 1 of the CRM answers it: team logins, per-member
+activity logging, a Kanban pipeline, and a leaderboard for the placement head.
+
+### Roles and Authentication
+
+Two roles, enforced on the server with decorators in `auth.py`:
+
+| Role | Can do |
+|------|--------|
+| **admin** (placement head) | Everything a member can, **plus** view the leaderboard, manage members, assign leads, and edit any lead |
+| **member** | Log activity, move the pipeline, and edit their own or unassigned leads |
+
+Passwords are stored only as Werkzeug PBKDF2 hashes — plaintext never touches the
+database. Login issues a Flask **signed session cookie**; the cookie is hardened
+(`HttpOnly`, `SameSite`, and `Secure` in production via `SESSION_COOKIE_SECURE`).
+
+```python
+def login_required(f):
+    @wraps(f)
+    def wrapper(*a, **kw):
+        if auth_disabled():            # dev mode (no SECRET_KEY) → guards no-op
+            return f(*a, **kw)
+        if not current_user():
+            return jsonify({'error': 'auth required'}), 401
+        return f(*a, **kw)
+    return wrapper
+
+def admin_required(f):
+    # as above, but also requires current_user()['role'] == 'admin'
+    ...
+```
+
+**First-admin bootstrap:** on startup, if no users exist yet, the placement head's
+account is seeded from `ADMIN_EMAIL` / `ADMIN_PASSWORD`. In production a missing or
+too-short admin password prints a loud fatal banner rather than silently starting
+open.
+
+### Separate Login Database
+
+User accounts live in their own database (`AUTH_MONGO_URI`, e.g. the same Atlas
+cluster with db name `signup`), isolated from scraped job data. It falls back to
+`MONGO_URI` when unset, so single-database setups still work. See
+[Database Design](#5-database-design) for the rationale and the `_get_auth_db()` code.
+
+### Activity Logging — One Touch, Many Channels
+
+A committee member often calls **and** emails a company in the same sitting. The log
+models this as a `channels` array so one entry can credit multiple channels while
+still counting as a **single touch**:
+
+```json
+{ "job_id": "...", "user_id": "...", "channels": ["call", "email"],
+  "outcome": "interested", "remarks": "will revert Tuesday" }
+```
+
+The leaderboard aggregation normalises legacy single-channel rows into the same array
+shape so both old and new records score identically:
+
+```python
+{'$addFields': {'_ch': {'$ifNull': ['$channels', ['$channel']]}}},
+# a channel scores if PRESENT in _ch; `total` still increments once per entry
+'calls':  {'$sum': {'$cond': [{'$in': ['call',  '$_ch']}, 1, 0]}},
+'emails': {'$sum': {'$cond': [{'$in': ['email', '$_ch']}, 1, 0]}},
+```
+
+### Leaderboard — Weighted Scoring
+
+Counting raw calls would reward noise. The score weights **outcomes** above
+**effort**, so a member who books a drive outranks one who made 20 low-value calls:
+
+```python
+LEADERBOARD_WEIGHTS = {
+    'reply_received':  5,   # a company replied
+    'drive_scheduled': 5,   # a campus drive booked
+    'interested':      3,   # company expressed interest
+    'call':            1,   # per logged call
+    'email':           1,   # per logged email
+    'whatsapp':        1,   # per logged WhatsApp
+    'company':         2,   # per distinct company touched (breadth)
+}
+```
+
+The admin sees a **weekly** and an **all-time** view. Active members with zero
+activity are still listed (score 0) so the head sees everyone, not just the active
+ones — read from the auth database so the roster is complete.
+
+### Kanban Pipeline
+
+Leads move across six stages; dropping a card writes the mapped `status` back onto the
+job, so the pipeline and the job board stay in sync:
+
+| Stage (column) | Job status written |
+|----------------|--------------------|
+| To Contact | `new` |
+| Contacted | `contacted` |
+| Interested | `replied` |
+| Drive Scheduled | `drive_scheduled` |
+| Placed (won) | `placed` |
+| Rejected (lost) | `rejected` |
+
+```python
+STAGE_TO_STATUS = {
+    'to_contact': 'new', 'contacted': 'contacted', 'interested': 'replied',
+    'drive_scheduled': 'drive_scheduled',
+    'closed_won': 'placed', 'closed_lost': 'rejected',
+}
+```
+
+### Ownership Rule
+
+A lead can be assigned to a member. The edit check keeps members in their lane while
+letting the head act on anything:
+
+```python
+def _can_edit_job(job_id):
+    user = current_user()
+    if user['role'] == 'admin':
+        return True                     # admin edits anything
+    owner = get_job_owner(job_id)
+    return owner in (None, user['id'])  # member: own or unassigned only
+```
+
+---
+
+## 17. Bugs We Fixed
 
 ### Bug 1: Job Board Showed "0 of 0 Jobs" (416 Jobs in Database)
 
@@ -1303,7 +1510,40 @@ test "$HTTP_STATUS" = "200" -o "$HTTP_STATUS" = "201" -o "$HTTP_STATUS" = "202"
 
 ---
 
-## 17. System Architecture Diagram
+### Bug 10: Connection Layer Ignored the Database Name in the URI
+
+**Symptom:** Pointing `MONGO_URI` at a different database name (e.g. `.../jobs_test`
+for an isolated test) still read and wrote the real `jobs` database. Test isolation
+wasn't actually isolated.
+
+**Root Cause:** `_get_db()` hardcoded `_client['jobs']` — it selected the database by
+a literal name and **ignored whatever database was named in the URI**. Every
+connection resolved to `jobs` no matter what the URI said, so any operation intended
+for a throwaway database silently hit production data.
+
+**Fix:** Parse and honour the database name from the URI, defaulting to `jobs` only
+when the URI omits one. A plain regex is used rather than `pymongo.uri_parser.parse_uri`
+because the latter performs a live DNS lookup for `mongodb+srv://` URIs, which fails
+offline and in tests:
+
+```python
+def _db_name_from_uri(uri):
+    m = re.search(r'^mongodb(?:\+srv)?://[^/]+/([^/?]+)', uri.strip(), re.I)
+    return m.group(1) if (m and m.group(1)) else _DEFAULT_DB_NAME
+
+_db = _client[_db_name_from_uri(MONGO_URI)]     # honour the URI's db name
+print(f'[MongoDB] Connected OK  (database: {_db.name})')   # prints the real target
+```
+
+**Lesson:** a connection helper must resolve to exactly the target the caller asked
+for, and it should announce that target on connect. The startup line now prints the
+resolved database name, so it is always obvious which database the app is talking to.
+This also unlocked the separate `signup` auth database, which relies on the URL's db
+name being honoured per connection.
+
+---
+
+## 18. System Architecture Diagram
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
@@ -1353,18 +1593,24 @@ test "$HTTP_STATUS" = "200" -o "$HTTP_STATUS" = "201" -o "$HTTP_STATUS" = "202"
 └──────────────────────────────────────────────────────────────────┘
 ```
 
+**CRM data plane:** the same MongoDB Atlas cluster also holds the CRM `activities`
+collection (alongside `jobs`), while the `users`/login accounts live in a separate
+`signup` database on that cluster (`AUTH_MONGO_URI`) — identity isolated from content.
+
 ---
 
-## 18. Results
+## 19. Results
 
 | Metric | Value |
 |--------|-------|
-| Jobs in database | 416+ |
+| Jobs in database | 540+ |
 | HR emails discovered | 95+ |
 | Phone numbers found | 80+ |
 | Job boards integrated | 25+ |
 | Contact enrichment sources | 8 parallel |
-| API endpoints | 21 |
+| API endpoints | 35+ (incl. CRM + auth) |
+| CRM: roles / databases | 2 roles (admin, member) / 2 databases (jobs, signup) |
+| CRM: pipeline stages | 6 (To Contact → Placed / Rejected) |
 | GitHub Actions workflows | 3 |
 | Monthly infrastructure cost | $0 |
 | CI/CD pipeline time | ~3 minutes |
@@ -1373,7 +1619,7 @@ test "$HTTP_STATUS" = "200" -o "$HTTP_STATUS" = "201" -o "$HTTP_STATUS" = "202"
 
 ---
 
-## 19. Skills Demonstrated
+## 20. Skills Demonstrated
 
 ### Programming
 - Python 3.11 — ThreadPoolExecutor, context managers, generators, regex
@@ -1384,11 +1630,13 @@ test "$HTTP_STATUS" = "200" -o "$HTTP_STATUS" = "201" -o "$HTTP_STATUS" = "202"
 
 ### Backend Engineering
 - REST API design — correct HTTP methods, status codes, error handling
+- Authentication & authorization — signed session cookies, PBKDF2 password hashing, role-based access control (admin/member) via decorators
 - Multithreading — race condition identification and resolution
 - Web scraping — BeautifulSoup4, lxml, requests, anti-blocking headers, timeouts
 - Email — SMTP, MIME multipart, Gmail App Password authentication
 - Data validation — Google libphonenumber, RFC email validator
 - NaN/Infinity sanitization in serialization pipeline
+- Multi-database design — isolating auth/identity from content, with graceful single-DB fallback
 
 ### Database
 - MongoDB schema design — flexible document model for heterogeneous data
@@ -1414,7 +1662,7 @@ test "$HTTP_STATUS" = "200" -o "$HTTP_STATUS" = "201" -o "$HTTP_STATUS" = "202"
 
 ---
 
-## 20. Interview Q&A
+## 21. Interview Q&A
 
 **Q: Walk me through the architecture in 60 seconds.**  
 > Render hosts a Flask web app in Docker — it only serves the UI and API. When a user searches for jobs, Flask calls GitHub's API to trigger a `workflow_dispatch` event on `scrape.yml`. A GitHub Actions runner with 2 CPU and 7GB RAM does the heavy scraping and contact enrichment, saving everything to MongoDB Atlas. The browser polls `/api/status` every 1.8 seconds — Flask reads job progress from MongoDB. When done, the browser fetches results and renders them with grade badges. Total cost: $0/month.
@@ -1478,6 +1726,31 @@ test "$HTTP_STATUS" = "200" -o "$HTTP_STATUS" = "201" -o "$HTTP_STATUS" = "202"
 
 **Q: How did you handle the GITHUB_PAT naming issue?**  
 > GitHub silently rejects any repository secret with the `GITHUB_` prefix — it's reserved for GitHub's own built-in secrets like `GITHUB_TOKEN`. If you create a secret named `GITHUB_PAT`, it appears saved but the value is never injected into the workflow environment. The fix is to name it `GH_PAT` and update both the Render environment variable and the `os.environ.get()` call in `app.py`. Took about 30 minutes to debug because GitHub gives no error message — the secret just appears empty.
+
+---
+
+**Q: Why store the CRM user accounts in a separate database from the jobs?**
+> Identity and content are different security domains. Password hashes and login
+> accounts don't belong in the same database as scraped public job listings — a bad
+> export, migration, or cleanup on the jobs side should never be able to touch
+> credentials. So users live in their own `signup` database via `AUTH_MONGO_URI`,
+> while activities — which reference a `job_id` — stay next to the jobs they point to.
+> I made it degrade gracefully: `AUTH_MONGO_URI` defaults to `MONGO_URI` when unset, so
+> a simple deployment still runs on one database with zero extra config. When both URIs
+> point at the same cluster, the code reuses one connection pool and just selects the
+> other db name, so the isolation costs nothing at runtime.
+
+---
+
+**Q: How does the leaderboard avoid rewarding busywork?**
+> Raw call counts would incentivise noise, so the score weights outcomes over effort:
+> a reply received or a campus drive booked is worth 5, an "interested" is 3, and each
+> individual call/email/WhatsApp is worth 1, plus 2 per distinct company touched to
+> reward breadth. One logged activity can span multiple channels (call *and* email in
+> one sitting) but still counts as a single touch — the channels are stored as an array
+> and the aggregation credits each channel while only incrementing the touch count once.
+> The head gets a weekly and an all-time view, and members with zero activity still
+> appear at 0 so everyone is visible, not just the active ones.
 
 ---
 

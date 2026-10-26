@@ -1,0 +1,383 @@
+{
+  "generated_at": "2026-10-17T07:36:51.154489+00:00",
+  "label": "baseline",
+  "note": "Serper is OFF for all acceptance benchmarks so every run shares one source set. These numbers are NOT comparable to CLAUDE_CODE_BRIEF \u00a71, which was measured from CSVs where Google Search was the top email source. \u00a71 is context; this file is the baseline.",
+  "static_baseline": {
+    "primary_denominator": "unique_companies",
+    "denominators": {
+      "rows": 3355,
+      "unique_triples": 532,
+      "unique_companies": 321
+    },
+    "coverage": {
+      "by_rows": {
+        "n": 3355,
+        "with_email_n": 923,
+        "with_email_pct": 27.5,
+        "with_phone_n": 332,
+        "with_phone_pct": 9.9
+      },
+      "by_triples": {
+        "n": 532,
+        "with_email_n": 154,
+        "with_email_pct": 28.9,
+        "with_phone_n": 76,
+        "with_phone_pct": 14.3
+      },
+      "by_company": {
+        "n": 321,
+        "with_email_n": 94,
+        "with_email_pct": 29.3,
+        "with_phone_n": 73,
+        "with_phone_pct": 22.7
+      }
+    },
+    "distinct_emails": 126,
+    "distinct_phones": 155,
+    "mean_contacts_per_company": 0.98,
+    "mean_contacts_per_company_global_ratio": 0.88
+  },
+  "acceptance_targets": {
+    "companies_with_email_pct": {
+      "baseline": 29.3,
+      "target": 60.0,
+      "target_basis": "absolute (\u00a75)",
+      "multiplier_derived_target": 64.4,
+      "multiplier_from_s5": 2.2
+    },
+    "companies_with_phone_pct": {
+      "baseline": 22.7,
+      "target": 35.0,
+      "target_basis": "absolute (\u00a75)",
+      "multiplier_derived_target": 55.6,
+      "multiplier_from_s5": 2.45
+    },
+    "mean_contacts_per_company": {
+      "baseline": 0.98,
+      "target": 3.0,
+      "target_basis": "absolute (\u00a75)",
+      "multiplier_derived_target": 4.2,
+      "multiplier_from_s5": 4.29
+    },
+    "non_role_email_share_pct": {
+      "baseline": null,
+      "target": 40.0,
+      "target_basis": "absolute (\u00a75)",
+      "multiplier_derived_target": null,
+      "multiplier_from_s5": null,
+      "note": "A share of emails \u2014 unaffected by the denominator fix either way."
+    },
+    "_basis": "Coverage uses the per-unique-company denominator; \u00a71 is superseded. The BAR is \u00a75's original ABSOLUTE figures (>=60% email, >=35% phone, >=3.0 contacts/company, >=40% non-role). The multiplier-derived column is shown only for comparison: a multiplier anchored to a baseline this broken is not a meaningful objective."
+  },
+  "static_baseline_brief_s1_SUPERSEDED": {
+    "total_rows": 3355,
+    "unique_triples": 532,
+    "unique_companies": 321,
+    "pct_rows_with_email": 27.3,
+    "pct_rows_with_phone": 14.3,
+    "distinct_emails": 121,
+    "distinct_phones": 148,
+    "mean_contacts_per_company": 0.7,
+    "_note": "\u00a71 computed coverage against the 532 deduplicated triples, not the 3,355 rows. Superseded: all coverage metrics and acceptance targets now use the per-unique-company denominator. Kept for traceability."
+  },
+  "manifest": [
+    {
+      "file": "restored data/placement_jobs (1).csv",
+      "expected": 100,
+      "actual": 100,
+      "status": "ok"
+    },
+    {
+      "file": "restored data/placement_jobs (2).csv",
+      "expected": 354,
+      "actual": 354,
+      "status": "ok"
+    },
+    {
+      "file": "restored data/placement_jobs (3).csv",
+      "expected": 354,
+      "actual": 354,
+      "status": "ok"
+    },
+    {
+      "file": "restored data/placement_jobs (4).csv",
+      "expected": 52,
+      "actual": 52,
+      "status": "ok"
+    },
+    {
+      "file": "restored data/placement_jobs (5).csv",
+      "expected": 16,
+      "actual": 16,
+      "status": "ok"
+    },
+    {
+      "file": "restored data/placement_jobs (6).csv",
+      "expected": 476,
+      "actual": 476,
+      "status": "ok"
+    },
+    {
+      "file": "restored data/placement_jobs (7).csv",
+      "expected": 481,
+      "actual": 481,
+      "status": "ok"
+    },
+    {
+      "file": "restored data/placement_jobs (8).csv",
+      "expected": 490,
+      "actual": 490,
+      "status": "ok"
+    },
+    {
+      "file": "restored data/placement_jobs.csv",
+      "expected": 52,
+      "actual": 52,
+      "status": "ok"
+    },
+    {
+      "file": "restored data/placement_jobs.scsv.csv",
+      "expected": 490,
+      "actual": 490,
+      "status": "ok"
+    },
+    {
+      "file": "placement_jobs.scsv.csv",
+      "expected": 490,
+      "actual": 490,
+      "status": "ok"
+    }
+  ],
+  "manifest_mismatches": [],
+  "run": {
+    "seed": 42,
+    "n_companies": 2,
+    "serper": false,
+    "serial": true,
+    "wall_clock_seconds": 15.7,
+    "denominator": "sampled_companies",
+    "mean_contacts_per_company": 1.0,
+    "companies_with_email_n": 2,
+    "companies_with_email_pct": 100.0,
+    "companies_with_phone_n": 0,
+    "companies_with_phone_pct": 0.0,
+    "distinct_emails": 2,
+    "distinct_phones": 0,
+    "pct_role_accounts": 50.0,
+    "pct_personal_providers": 0.0,
+    "pct_hr_family": 0.0,
+    "pct_generic_role": 50.0,
+    "pct_person_like": 50.0,
+    "pct_non_role_per_brief_s5": 50.0,
+    "discovered_contacts_total": 2,
+    "discovered_distinct_emails": 2,
+    "discovered_pct_generic_role": 50.0
+  },
+  "per_source": {
+    "desc": {
+      "attempts": 2,
+      "hits": 0,
+      "hit_rate": 0.0,
+      "emails_found": 0,
+      "phones_found": 0,
+      "p50_latency_ms": 0,
+      "p95_latency_ms": 0,
+      "http_requests": 0,
+      "http_2xx": 0,
+      "http_403": 0,
+      "http_429": 0,
+      "http_5xx": 0,
+      "http_other": 0,
+      "timeouts": 0,
+      "exceptions": 0,
+      "cache_hits": 0,
+      "non_200_rate": 0.0,
+      "blocking_suspected": false
+    },
+    "hrdb": {
+      "attempts": 2,
+      "hits": 1,
+      "hit_rate": 0.5,
+      "emails_found": 1,
+      "phones_found": 0,
+      "p50_latency_ms": 4,
+      "p95_latency_ms": 5,
+      "http_requests": 0,
+      "http_2xx": 0,
+      "http_403": 0,
+      "http_429": 0,
+      "http_5xx": 0,
+      "http_other": 0,
+      "timeouts": 0,
+      "exceptions": 0,
+      "cache_hits": 0,
+      "non_200_rate": 0.0,
+      "blocking_suspected": false
+    },
+    "im": {
+      "attempts": 2,
+      "hits": 0,
+      "hit_rate": 0.0,
+      "emails_found": 0,
+      "phones_found": 0,
+      "p50_latency_ms": 8,
+      "p95_latency_ms": 8,
+      "http_requests": 2,
+      "http_2xx": 2,
+      "http_403": 0,
+      "http_429": 0,
+      "http_5xx": 0,
+      "http_other": 0,
+      "timeouts": 0,
+      "exceptions": 0,
+      "cache_hits": 2,
+      "non_200_rate": 0.0,
+      "blocking_suspected": false
+    },
+    "jd": {
+      "attempts": 2,
+      "hits": 0,
+      "hit_rate": 0.0,
+      "emails_found": 0,
+      "phones_found": 0,
+      "p50_latency_ms": 2,
+      "p95_latency_ms": 2,
+      "http_requests": 2,
+      "http_2xx": 2,
+      "http_403": 0,
+      "http_429": 0,
+      "http_5xx": 0,
+      "http_other": 0,
+      "timeouts": 0,
+      "exceptions": 0,
+      "cache_hits": 2,
+      "non_200_rate": 0.0,
+      "blocking_suspected": false
+    },
+    "page": {
+      "attempts": 2,
+      "hits": 1,
+      "hit_rate": 0.5,
+      "emails_found": 1,
+      "phones_found": 0,
+      "p50_latency_ms": 64,
+      "p95_latency_ms": 74,
+      "http_requests": 2,
+      "http_2xx": 2,
+      "http_403": 0,
+      "http_429": 0,
+      "http_5xx": 0,
+      "http_other": 0,
+      "timeouts": 0,
+      "exceptions": 0,
+      "cache_hits": 2,
+      "non_200_rate": 0.0,
+      "blocking_suspected": false
+    },
+    "photon": {
+      "attempts": 2,
+      "hits": 0,
+      "hit_rate": 0.0,
+      "emails_found": 0,
+      "phones_found": 0,
+      "p50_latency_ms": 17,
+      "p95_latency_ms": 32,
+      "http_requests": 2,
+      "http_2xx": 2,
+      "http_403": 0,
+      "http_429": 0,
+      "http_5xx": 0,
+      "http_other": 0,
+      "timeouts": 0,
+      "exceptions": 0,
+      "cache_hits": 2,
+      "non_200_rate": 0.0,
+      "blocking_suspected": false
+    },
+    "site": {
+      "attempts": 2,
+      "hits": 0,
+      "hit_rate": 0.0,
+      "emails_found": 0,
+      "phones_found": 0,
+      "p50_latency_ms": 4615,
+      "p95_latency_ms": 8438,
+      "http_requests": 18,
+      "http_2xx": 18,
+      "http_403": 0,
+      "http_429": 0,
+      "http_5xx": 0,
+      "http_other": 0,
+      "timeouts": 0,
+      "exceptions": 0,
+      "cache_hits": 10,
+      "non_200_rate": 0.0,
+      "blocking_suspected": false
+    },
+    "sulekha": {
+      "attempts": 2,
+      "hits": 0,
+      "hit_rate": 0.0,
+      "emails_found": 0,
+      "phones_found": 0,
+      "p50_latency_ms": 884,
+      "p95_latency_ms": 948,
+      "http_requests": 2,
+      "http_2xx": 0,
+      "http_403": 2,
+      "http_429": 0,
+      "http_5xx": 0,
+      "http_other": 0,
+      "timeouts": 0,
+      "exceptions": 0,
+      "cache_hits": 0,
+      "non_200_rate": 1.0,
+      "blocking_suspected": true
+    },
+    "tradeindia": {
+      "attempts": 2,
+      "hits": 0,
+      "hit_rate": 0.0,
+      "emails_found": 0,
+      "phones_found": 0,
+      "p50_latency_ms": 502,
+      "p95_latency_ms": 674,
+      "http_requests": 2,
+      "http_2xx": 0,
+      "http_403": 0,
+      "http_429": 0,
+      "http_5xx": 0,
+      "http_other": 2,
+      "timeouts": 0,
+      "exceptions": 0,
+      "cache_hits": 0,
+      "non_200_rate": 1.0,
+      "blocking_suspected": true
+    },
+    "unknown": {
+      "attempts": 0,
+      "hits": 0,
+      "hit_rate": 0.0,
+      "emails_found": 0,
+      "phones_found": 0,
+      "p50_latency_ms": null,
+      "p95_latency_ms": null,
+      "http_requests": 7,
+      "http_2xx": 4,
+      "http_403": 0,
+      "http_429": 0,
+      "http_5xx": 0,
+      "http_other": 0,
+      "timeouts": 0,
+      "exceptions": 3,
+      "cache_hits": 2,
+      "non_200_rate": 0.429,
+      "blocking_suspected": true
+    }
+  },
+  "flags": [
+    "sulekha: non-200 rate 100% (>30%) \u2014 this source's hit rate is measuring blocking, not yield.",
+    "tradeindia: non-200 rate 100% (>30%) \u2014 this source's hit rate is measuring blocking, not yield.",
+    "unknown: non-200 rate 43% (>30%) \u2014 this source's hit rate is measuring blocking, not yield."
+  ]
+}

@@ -86,6 +86,14 @@ def hash_password(plain):
     return generate_password_hash(plain)
 
 
+# A real PBKDF2 hash of a value nobody holds, used to spend the same CPU on a login
+# for an address that does not exist as on one that does. Without it, response time
+# distinguishes "no such user" from "wrong password" no matter how carefully the error
+# message is worded — the message was already generic; the timing was not.
+# Generated at import so it costs one hash per process, not one per request.
+DUMMY_PASSWORD_HASH = generate_password_hash('placementradar-nonexistent-account')
+
+
 def verify_password(stored_hash, plain):
     try:
         return check_password_hash(stored_hash, plain)

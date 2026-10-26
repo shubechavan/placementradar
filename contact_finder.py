@@ -30,6 +30,13 @@ import concurrent.futures, threading
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse, quote_plus
 
+# Instrumentation (brief §G). Neither module imports `database`, so importing them
+# here keeps tools/bench.py's isolation assertion intact.
+import source_metrics as _SM
+import net_throttle as _NT
+# Domain resolution with the corroboration gate. Pure module, no DB import.
+import domain_utils as _DU
+
 # ── phonenumbers (Google libphonenumber) ──────────────────────────────────────
 import phonenumbers
 from phonenumbers import PhoneNumberMatcher, PhoneNumberFormat, NumberParseException
@@ -153,10 +160,14 @@ def _extract_phones_from_text(text):
                 continue
             e164   = phonenumbers.format_number(num, PhoneNumberFormat.E164)
             digits = e164[3:]                      # strip "+91"
-            if _valid_india_mobile(digits) and digits not in phones:
+            if digits in phones:
+                continue
+            if _valid_india_mobile(digits):
                 phones.append(digits)
-    except Exception:
-        pass
+            elif _valid_india_landline(num, digits, match.raw_string):
+                phones.append(digits)
+    except Exception as _e:
+        _SM.record_failure('extract_phone', _e)
 
     # Supplement: WhatsApp URLs (libphonenumber won't find /91XXXXXXXXXX in a URL)
     for m in _WA_RE.findall(text):
@@ -165,6 +176,47 @@ def _extract_phones_from_text(text):
             phones.append(d)
 
     return phones
+
+
+def _valid_india_landline(num, digits, raw):
+    """An Indian FIXED-LINE number, written the way people write phone numbers.
+
+    THE BUG THIS FIXES. Phone extraction accepted MOBILES ONLY (`digits[0] in
+    '6789'`). Company switchboards are landlines, and Mumbai's all start 022 — so
+    "+91 22 6628 9600" (Bain) and "022-25336112" were discarded from every contact
+    page the crawler ever read. Given "Call +91 22 6628 9600 or 022-25336112. Mobile
+    98765 43210", the old code kept only the mobile.
+
+    Landlines need one guard mobiles don't: a bare 10-digit run such as an order ID
+    "2025001234" is technically a valid Pune number (area code 20). So a landline is
+    accepted only when the source text is FORMATTED like a phone — a +91 or 0 prefix,
+    or a space, hyphen, dot or bracket separator. Toll-free, premium-rate and shared-
+    cost numbers are excluded: those are customer-care lines, not company offices.
+    """
+    if not digits or len(digits) != 10 or digits in PHONE_BLACKLIST:
+        return False
+    if re.search(r'(\d)\1{6,}', digits):
+        return False
+    if phonenumbers.number_type(num) not in (phonenumbers.PhoneNumberType.FIXED_LINE,
+                                             phonenumbers.PhoneNumberType.FIXED_LINE_OR_MOBILE):
+        return False
+    r = (raw or '').strip()
+    return r.startswith(('+', '0')) or bool(re.search(r'[\s\-.()]', r))
+
+
+def _is_india_fixed_line(digits):
+    """10 national digits that libphonenumber recognises as an Indian fixed line."""
+    if not digits or len(digits) != 10 or digits in PHONE_BLACKLIST:
+        return False
+    if re.search(r'(\d)\1{6,}', digits):
+        return False
+    try:
+        num = phonenumbers.parse('+91' + digits, None)
+    except NumberParseException:
+        return False
+    return (phonenumbers.is_valid_number(num) and
+            phonenumbers.number_type(num) in (phonenumbers.PhoneNumberType.FIXED_LINE,
+                                              phonenumbers.PhoneNumberType.FIXED_LINE_OR_MOBILE))
 
 
 def _valid_india_mobile(digits):
@@ -189,9 +241,16 @@ def _parse_phone_raw(raw):
         num = phonenumbers.parse(raw, "IN")
         if not phonenumbers.is_valid_number(num):
             return ''
+        if num.country_code != 91:
+            return ''
         e164 = phonenumbers.format_number(num, PhoneNumberFormat.E164)
         digits = e164[3:]
-        return digits if _valid_india_mobile(digits) else ''
+        # tel: links and structured-data `telephone` fields are explicitly phones,
+        # and they are where companies publish their office LANDLINE. This returned
+        # mobiles only, so `tel:+912266289600` was discarded.
+        if _valid_india_mobile(digits) or _valid_india_landline(num, digits, raw):
+            return digits
+        return ''
     except NumberParseException:
         pass
     # Fallback: strip to digits
@@ -252,8 +311,11 @@ def _enrich_single_job(job, cache, cache_lock, serper_key=''):
         emails_db  = []
         phones     = []
         sources    = {}
+        phone_sources = {}
 
-        company_domain = _get_domain(company_url) or _guess_domain(company)
+        _listed_domain = _get_domain(company_url)
+        _confirmed     = '' if _listed_domain else _resolve_domain(company)
+        company_domain = _listed_domain or _confirmed
 
         # ── STEP 1: Extract from job description ──────────────────────────
         desc_emails, desc_phones = _extract_from_desc(desc)
@@ -279,8 +341,12 @@ def _enrich_single_job(job, cache, cache_lock, serper_key=''):
                 if p not in phones: phones.append(p)
 
         # ── STEP 3+: Parallel web fetches ────────────────────────────────
-        has_real_url = bool(company_url)
-        base_url     = company_url or (f'https://www.{company_domain}' if company_domain else None)
+        # A domain that passed the corroboration gate is at least as trustworthy
+        # as a job board's company_url, so it gets STRICT own-domain filtering.
+        # Previously a guessed domain ran non-strict — accepting any email on
+        # the page — which on a wrong guess is an attribution leak.
+        has_real_url = bool(company_url) or bool(_confirmed)
+        base_url     = company_url or (f'https://{company_domain}' if company_domain else None)
         needs_zauba  = bool(company and any(kw in company.lower() for kw in ZAUBA_KEYWORDS))
 
         site_ck  = f'site:{company_domain}' if (company_domain and company_domain not in JOB_BOARD_DOMAINS) else None
@@ -315,12 +381,40 @@ def _enrich_single_job(job, cache, cache_lock, serper_key=''):
             fetch_futs['serp']  = sub.submit(_search_serper, company, location, serper_key)
 
         def _get(key, default):
+            """Collect one source's result.
+
+            THE SILENT FAILURE THIS FIXES (brief §G): this handler used to be
+            `except Exception: return default`, which swallowed a source's exception
+            AND its timeout and returned an empty result. A source that was fully
+            blocked, fully timing out, or raising on every call looked exactly like
+            one that found nothing — which is why five of Phase A's ten sources
+            reported 0.0% with no way to tell blocking from absence.
+
+            The empty default is still returned (a dead source must not break the
+            scrape), but the reason is now recorded instead of discarded.
+            """
             if key in fetch_futs:
                 t = 15 if key == 'serp' else 20 if key == 'photon' else 12
-                try: return fetch_futs[key].result(timeout=t) or default
-                except Exception: return default
+                _SM.record_attempt(key)
+                import time as _time
+                _t0 = _time.time()
+                try:
+                    res = fetch_futs[key].result(timeout=t) or default
+                except Exception as e:
+                    _SM.record_failure(key, e)
+                    return default
+                _SM.record_latency(key, (_time.time() - _t0) * 1000.0)
+                found = 0
+                if isinstance(res, dict):
+                    found = len(res.get('emails') or []) + len(res.get('phones') or [])
+                _SM.record_success(key, found)
+                return res
             v = _cached_lookup.get(key, _SKIP)
-            return v if v not in (_MISS, _SKIP) else default
+            if v not in (_MISS, _SKIP):
+                _SM.record_attempt(key)
+                _SM.record_success(key, 0)      # cache hit: no network, no yield claim
+                return v
+            return default
 
         site_data       = _get('site',       {'emails': [], 'phones': []})
         zauba_data      = _get('zauba',      {'emails': [], 'phones': []})
@@ -331,9 +425,12 @@ def _enrich_single_job(job, cache, cache_lock, serper_key=''):
         photon_data     = _get('photon',     {'emails': [], 'phones': []})
         serp_data       = _get('serp',       {'phones': [], 'emails': []})
 
-        # Release executor — any still-running site scraper threads will complete
-        # in the background without blocking this job's result collection.
-        sub.shutdown(wait=False)
+        # Release executor. `cancel_futures=True` drops work that has not STARTED;
+        # threads already running still finish (Python cannot interrupt them), so this
+        # does not block result collection. Without it, a queued source for an
+        # abandoned job stayed pending and kept a worker slot — the pool filled with
+        # work whose results nobody would ever read.
+        sub.shutdown(wait=False, cancel_futures=True)
 
         # Write results back to cache
         with cache_lock:
@@ -355,16 +452,20 @@ def _enrich_single_job(job, cache, cache_lock, serper_key=''):
             if e not in emails_web: emails_web.append(e)
             sources.setdefault(e, '🔍 Google Search')
 
-        # Merge phones — directories first (highest confidence), then site, then deep crawl
-        for src_phones in [jd_data.get('phones') or [],
-                           im_data.get('phones') or [],
-                           sulekha_data.get('phones') or [],
-                           tradeindia_data.get('phones') or [],
-                           serp_data.get('phones') or [],
-                           site_data.get('phones') or [],
-                           photon_data.get('phones') or []]:
+        # Merge phones — directories first (highest confidence), then site, then deep crawl.
+        # Source is recorded per number so the company store can score it (brief §4);
+        # previously phones carried no attribution at all.
+        for _src_id, src_phones in [('jd',         jd_data.get('phones') or []),
+                                    ('im',         im_data.get('phones') or []),
+                                    ('sulekha',    sulekha_data.get('phones') or []),
+                                    ('tradeindia', tradeindia_data.get('phones') or []),
+                                    ('serp',       serp_data.get('phones') or []),
+                                    ('site',       site_data.get('phones') or []),
+                                    ('photon',     photon_data.get('phones') or [])]:
             for p in src_phones:
-                if p not in phones: phones.append(p)
+                if p not in phones:
+                    phones.append(p)
+                    phone_sources.setdefault(p, _src_id)
 
         # ── STEP 6: HR Database fallback ──────────────────────────────────
         db_hits = db_lookup(company)
@@ -388,10 +489,39 @@ def _enrich_single_job(job, cache, cache_lock, serper_key=''):
         ranked = [e for e in ranked
                   if not any(jb in e.split('@')[-1] for jb in JOB_BOARD_DOMAINS)]
 
-        job['emails']       = ', '.join(ranked[:4])
+        # No [:4] / [:3] slicing. Phase A measured 44 contacts discovered vs ~31
+        # surviving — the slice silently discarded ~30% of real yield. Everything
+        # found is kept; ranking still puts the best first.
+        job['emails']       = ', '.join(ranked)
         job['hr_contact']   = ranked[0] if ranked else ''
-        job['phone']        = ', '.join(clean_phones[:3])
+        job['phone']        = ', '.join(clean_phones)
         job['email_source'] = sources.get(ranked[0], '') if ranked else ''
+
+        # Structured, per-source contacts for the company store. Attached in memory
+        # only — contact_finder deliberately imports no database module, so the
+        # benchmark harness can run the pipeline with zero DB connections.
+        # save_jobs() consumes and strips this key.
+        _EMOJI_TO_SOURCE = {
+            '📄 Job Description': 'desc', '📄 Job Page': 'page',
+            '💼 Company Website': 'site', '🏢 Zauba Corp': 'zauba',
+            '🕷️ Deep Crawl': 'photon', '🔍 Google Search': 'serp',
+            '🗂️ HR Database': 'hrdb',
+        }
+        discovered = []
+        for e in ranked:
+            discovered.append({
+                'type': 'email',
+                'value': e,
+                'source': _EMOJI_TO_SOURCE.get(sources.get(e, ''), 'unknown'),
+            })
+        for p in clean_phones:
+            digits = re.sub(r'\D', '', p)[-10:]
+            discovered.append({
+                'type': 'phone',
+                'value': p,
+                'source': phone_sources.get(digits, 'unknown'),
+            })
+        job['_discovered_contacts'] = discovered
 
         # Auto-save new contacts to HR database
         src = sources.get(ranked[0], '') if ranked else ''
@@ -404,8 +534,8 @@ def _enrich_single_job(job, cache, cache_lock, serper_key=''):
                            designation='HR',
                            city=location.split(',')[0].strip()[:30],
                            source=f'Auto:{src[:20]}')
-    except Exception:
-        pass
+    except Exception as _e:
+        _SM.record_failure('hrdb_write', _e)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -537,10 +667,11 @@ def _scrape_company_site(base_url, expected_domain, strict_domain=True):
                                 tried_emails.add(e)
                                 result['emails'].append(e)
                 if result['phones']: break
-            except Exception:
+            except Exception as _e:
+                _SM.record_failure('site', _e, url=locals().get('u'))
                 continue
-    except Exception:
-        pass
+    except Exception as _e:
+        _SM.record_failure('site', _e, url=base_url)
     return result
 
 
@@ -597,19 +728,31 @@ def _extract_phones_from_page(soup):
 # ═════════════════════════════════════════════════════════════════════════════
 # STEP 4 — Zauba Corp
 # ═════════════════════════════════════════════════════════════════════════════
+def _dir_get(source_id, url, **kw):
+    """GET a shared directory site (Zauba, JustDial, IndiaMART, Sulekha, TradeIndia)
+    through net_throttle: one request at a time per domain, a 1 s gap, a User-Agent that
+    is stable per domain, and the HTTP status recorded in source health. Every company
+    is looked up on the same few directories, 4 companies at a time, which is the
+    pattern that gets an address blocked. One retry at most, so a source still fits its
+    12 s collection budget in `_get`."""
+    headers = {**kw.pop('headers', HEADERS), 'User-Agent': _NT.user_agent_for(url)}
+    return _NT.polite_request(lambda u: requests.get(u, headers=headers, **kw),
+                              url, source_id=source_id, max_retries=1)
+
+
 def _scrape_zauba(company_name):
     result = {'emails': [], 'phones': []}
     try:
         clean = re.sub(
             r'\s+(pvt\.?|ltd\.?|limited|private|technologies|tech|solutions|services|india|group)\.?\s*$',
             '', company_name.strip(), flags=re.I).strip()
-        r = requests.get(
+        r = _dir_get('zauba',
             f'https://www.zaubacorp.com/company-list/p-1/company/{quote_plus(clean)}',
             headers=HEADERS, timeout=6)
         soup = BeautifulSoup(r.text, 'lxml')
         link = soup.select_one('table a[href*="/company/"]')
         if not link: return result
-        r2    = requests.get('https://www.zaubacorp.com' + link['href'], headers=HEADERS, timeout=6)
+        r2    = _dir_get('zauba', 'https://www.zaubacorp.com' + link['href'], headers=HEADERS, timeout=6)
         soup2 = BeautifulSoup(r2.text, 'lxml')
         text  = soup2.get_text(' ')
         em, ph = _extract_from_desc(text)
@@ -633,7 +776,7 @@ def _scrape_justdial(company_name, location='india'):
             if c in location.lower():
                 city = c
                 break
-        r = requests.get(
+        r = _dir_get('jd',
             f'https://www.justdial.com/{city}/{quote_plus(clean)}',
             headers={**HEADERS,
                      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -674,7 +817,7 @@ def _scrape_indiamart(company_name):
         clean = re.sub(
             r'\s+(pvt\.?|ltd\.?|limited|private|technologies|tech|solutions|services|india|group)\.?\s*$',
             '', company_name.strip(), flags=re.I).strip()
-        r = requests.get(
+        r = _dir_get('im',
             f'https://dir.indiamart.com/search.mp?ss={quote_plus(clean)}&cattype=cid',
             headers={**HEADERS, 'Referer': 'https://www.indiamart.com/'},
             timeout=6)
@@ -815,10 +958,11 @@ def _photon_crawl(base_url, domain, max_pages=12):
                     else:
                         lo_queue.append(full)
 
-            except Exception:
+            except Exception as _e:
+                _SM.record_failure('photon', _e)
                 continue
-    except Exception:
-        pass
+    except Exception as _e:
+        _SM.record_failure('photon', _e, url=base_url)
     return result
 
 
@@ -832,7 +976,7 @@ def _scrape_sulekha(company_name, location='india'):
             r'\s+(pvt\.?|ltd\.?|limited|private|technologies|tech|solutions|services|india|group)\.?\s*$',
             '', company_name.strip(), flags=re.I).strip()
         city = location.split(',')[0].strip() or 'india'
-        r = requests.get(
+        r = _dir_get('sulekha',
             f'https://www.sulekha.com/search-results?searchkey={quote_plus(clean)}'
             f'&cityName={quote_plus(city)}',
             headers={**HEADERS, 'Referer': 'https://www.sulekha.com/'},
@@ -858,8 +1002,8 @@ def _scrape_sulekha(company_name, location='india'):
                 for p in _extract_phones_from_text(card.get_text(' ')):
                     if p not in result['phones']:
                         result['phones'].append(p)
-    except Exception:
-        pass
+    except Exception as _e:
+        _SM.record_failure('sulekha', _e)
     return result
 
 
@@ -872,7 +1016,7 @@ def _scrape_tradeindia(company_name):
         clean = re.sub(
             r'\s+(pvt\.?|ltd\.?|limited|private|technologies|tech|solutions|services|india|group)\.?\s*$',
             '', company_name.strip(), flags=re.I).strip()
-        r = requests.get(
+        r = _dir_get('tradeindia',
             f'https://www.tradeindia.com/search/?search_text={quote_plus(clean)}&category=company',
             headers={**HEADERS, 'Referer': 'https://www.tradeindia.com/'},
             timeout=6)
@@ -902,7 +1046,7 @@ def _scrape_tradeindia(company_name):
                 href = link['href']
                 if not href.startswith('http'):
                     href = 'https://www.tradeindia.com' + href
-                r2 = requests.get(href, headers=HEADERS, timeout=5)
+                r2 = _dir_get('tradeindia', href, headers=HEADERS, timeout=5)
                 if r2.status_code == 200:
                     soup2 = BeautifulSoup(r2.text, 'lxml')
                     for a in soup2.select('a[href^="tel:"]'):
@@ -913,8 +1057,8 @@ def _scrape_tradeindia(company_name):
                         for p in _extract_phones_from_text(soup2.get_text(' ')):
                             if p not in result['phones']:
                                 result['phones'].append(p)
-    except Exception:
-        pass
+    except Exception as _e:
+        _SM.record_failure('tradeindia', _e)
     return result
 
 
@@ -963,6 +1107,217 @@ def _get_domain(url):
     except: return ''
 
 
+_DOMAIN_CACHE = {}
+_DOMAIN_LOCK  = threading.Lock()
+
+
+def _resolve_domain(company):
+    """The company's CONFIRMED domain, or '' — never an unverified guess.
+
+    WHY THIS REPLACES _guess_domain(). Most Internshala jobs arrive with no
+    company_url, so enrichment had to guess a website from the name, and the guess
+    was wrong in two ways:
+
+      * it stripped only ONE trailing suffix, so "InstaWeb Labs Private Limited"
+        became `instaweblabsprivate.com` — a domain that does not exist;
+      * it only ever tried `.com`, so `hansinfotech.in` was unreachable by design.
+
+    Every guess then went straight to the website and deep-crawl scrapers. A live run
+    measured 24 ConnectionErrors from the website scraper alone and 0 phones across
+    8 companies.
+
+    This uses the project's own resolver: iterative suffix stripping, .com/.in/.co.in
+    candidates, parked-page screening, and the corroboration gate that requires the
+    page to independently name the company. The same machinery confirmed jio.com,
+    flipspaces.com and hansinfotech.in in testing. A company whose name is too
+    generic to guess safely ("Genesis") is not guessed at all.
+
+    Cached per process: repeated companies cost one resolution, not one per job.
+    """
+    key = _DU.company_key(company)
+    if not key:
+        return ''
+    with _DOMAIN_LOCK:
+        if key in _DOMAIN_CACHE:
+            return _DOMAIN_CACHE[key]
+    found, strategy = '', ''
+    level, _ = _DU.guess_risk(company)
+    _SM.record_attempt('resolve')
+    # guess_risk() returns 'reject' / 'weak' / 'ok'. This line first tested for
+    # 'skip' — a value it never returns — so generic names (Genesis -> genesis.com,
+    # i.e. Genesis Motors) were guessed and crawled. Caught by a regression test.
+    if level != 'reject':
+        full = [(c, 'full') for c in _DU.candidate_domains(company)[:3]]
+        short = [(c, 'short') for c in _short_name_candidates(company, key)]
+        for cand, kind in full + short:
+            found = _check_candidate(company, cand, kind)
+            if found:
+                strategy = kind
+                break
+        # Wikidata only after name-guessing fails — it costs two extra requests, and
+        # it is what recovers large companies whose site is NOT their name
+        # (Tata Consultancy Services -> tcs.com). Same verification gate applies.
+        if not found:
+            for cand in _wikidata_candidates(company):
+                found = _check_candidate(company, cand, 'wikidata')
+                if found:
+                    strategy = 'wikidata'
+                    break
+    _SM.record_success('resolve', 1 if found else 0)
+    with _DOMAIN_LOCK:
+        _DOMAIN_CACHE[key] = found
+        _DOMAIN_STRATEGY[key] = strategy
+    return found
+
+
+# Words that commonly open a company name AND are ordinary English. A short-name
+# domain built from one of these lands on a stranger (bright.com, smart.com,
+# prudent.com, creative.com — all measured). A BLOCKLIST WITH UNKNOWN COVERAGE —
+# the Indian-presence check in _resolve_domain is the second, independent layer.
+_COMMON_FIRST_WORDS = {
+    'smart', 'bright', 'global', 'creative', 'prudent', 'prime', 'premier', 'golden',
+    'silver', 'royal', 'united', 'digital', 'future', 'modern', 'classic', 'elite',
+    'expert', 'master', 'perfect', 'quality', 'super', 'ultra', 'value', 'vision',
+    'active', 'agile', 'brilliant', 'direct', 'dream', 'excel', 'fresh', 'grand',
+    'great', 'happy', 'health', 'ideal', 'infinite', 'logic', 'magic', 'matrix',
+    'mobile', 'nature', 'noble', 'optimal', 'orange', 'pioneer', 'planet', 'power',
+    'precise', 'quest', 'reliable', 'secure', 'simple', 'single', 'sharp', 'smooth',
+    'sonic', 'sound', 'spark', 'speed', 'sterling', 'strong', 'summit', 'target',
+    'think', 'trust', 'unique', 'universal', 'urban', 'venture', 'victory', 'vivid',
+    'world', 'impact', 'insight', 'bridge', 'square', 'circle', 'cross', 'frontier',
+    'galaxy', 'horizon', 'innovative', 'intelligent', 'network', 'online', 'option',
+    'paramount', 'pinnacle', 'platinum', 'popular', 'positive', 'precision', 'pristine',
+    'progress', 'quantum', 'rainbow', 'resource', 'sapphire', 'signature', 'spectrum',
+    'standard', 'supreme', 'synergy', 'triumph', 'velocity', 'vertex', 'western',
+    'eastern', 'northern', 'southern', 'national', 'international', 'indian',
+    'oriental', 'pacific', 'atlantic', 'alliance', 'partner', 'partners', 'service',
+    'system', 'design', 'studio', 'stream', 'square', 'source', 'motion', 'lotus',
+    'phoenix', 'falcon', 'eagle', 'tiger', 'lion', 'diamond', 'crystal', 'pearl',
+}
+
+_INDIA_RE = re.compile(
+    r'\+91|\bindia\b|\b(mumbai|navi\s*mumbai|thane|pune|bengaluru|bangalore|delhi|'
+    r'noida|gurgaon|gurugram|hyderabad|chennai|kolkata|ahmedabad|jaipur|kochi|'
+    r'indore|chandigarh|nagpur|surat|coimbatore|vadodara)\b', re.I)
+
+_DOMAIN_STRATEGY = {}
+
+
+def _check_candidate(company, cand, kind):
+    """Fetch one candidate domain and run every verification on it. '' if it fails."""
+    try:
+        r = requests.get(f'https://{cand}', headers=HEADERS, timeout=6,
+                         allow_redirects=True)
+    except Exception:
+        # A speculative candidate that does not resolve is a NEGATIVE ANSWER, not a
+        # source failure. Recording each one as a failure made the health dashboard
+        # show 12 failures against 0 attempts.
+        return ''
+    if r.status_code != 200:
+        return ''
+    if _DU.is_parked_page(r.text, r.url)[0]:     # returns (bool, detail)
+        return ''
+    ok, _ev = _DU.confirms_company(company, r.text, r.url)
+    if not ok:
+        return ''
+    # A short-name match needs a second, independent signal. Measured: on dictionary
+    # words the gate alone confirmed prudent.com (a domain broker), bright.com (US
+    # event rentals), smart.com (a car brand) and smart.in (a supermarket) — 4 of 5
+    # wrong. Every job here comes off an Indian board, so an unrelated foreign
+    # namesake is the common failure.
+    if kind == 'short' and not _INDIA_RE.search(r.text[:400000]):
+        return ''
+    return _DU.clean_company_domain(r.url) or cand
+
+
+# Wikidata's API policy requires a descriptive User-Agent. Without one, requests were
+# refused mid-run — and a refusal counted as "no website" made a 25% hit rate look
+# like 2%.
+_WIKIDATA_API = 'https://www.wikidata.org/w/api.php'
+_WIKIDATA_UA = {'User-Agent': 'PlacementRadar/1.0 (college placement outreach tool; '
+                              'https://github.com/shubechavan/placementradar)'}
+_ORG_DESC_RE = re.compile(
+    r'compan|corporat|business|firm|enterprise|software|technolog|bank|consult|'
+    r'service|manufactur|conglomerate|subsidiar|startup|organi[sz]ation|brand|retail|'
+    r'telecom|insur|airline|group', re.I)
+
+
+def _wikidata_candidates(company):
+    """Official-website candidates from Wikidata (property P856). Free, no key.
+
+    MEASURED against 40 companies whose domain was already confirmed: Wikidata knew a
+    website for 10 (25% — essentially large companies only), and 4 of those 10 were
+    wrong or a different entity. The worst: ExcelR -> excelra.com, a DIFFERENT company
+    with a similar name. So two guards beyond the usual verification gate:
+
+      * the entity must be DESCRIBED as an organisation, not a person or a film;
+      * the entity's NAME must match the company — same company_key, or the same
+        distinctive words. "Excelra" vs "ExcelR" fails that; "Tata Consultancy
+        Services" vs "Tata Consultancy Services Ltd" passes.
+
+    What it fixes: TCS -> tcs.com, Infosys, Capgemini, Jio — large companies whose
+    website is NOT their name, which name-guessing can never find.
+    """
+    want_key = _DU.company_key(company)
+    want_tok = set(_DU.distinctive_tokens(company))
+    try:
+        r = requests.get(_WIKIDATA_API, params={
+            'action': 'wbsearchentities', 'search': company, 'language': 'en',
+            'type': 'item', 'limit': 5, 'format': 'json'},
+            headers=_WIKIDATA_UA, timeout=6)
+        if r.status_code != 200 or 'json' not in (r.headers.get('content-type') or ''):
+            _SM.record_http('wikidata', r.status_code)
+            return []
+        hits = r.json().get('search', [])
+    except Exception as e:
+        _SM.record_failure('wikidata', e)
+        return []
+    out = []
+    for h in hits:
+        if not _ORG_DESC_RE.search(h.get('description') or ''):
+            continue
+        names = {h.get('label') or '', (h.get('match') or {}).get('text') or ''}
+        same = any(_DU.company_key(n) == want_key or
+                   (want_tok and set(_DU.distinctive_tokens(n)) == want_tok)
+                   for n in names if n)
+        if not same:
+            continue
+        try:
+            c = requests.get(_WIKIDATA_API, params={
+                'action': 'wbgetclaims', 'entity': h['id'], 'property': 'P856',
+                'format': 'json'}, headers=_WIKIDATA_UA, timeout=6).json()
+        except Exception as e:
+            _SM.record_failure('wikidata', e)
+            continue
+        for claim in c.get('claims', {}).get('P856', [])[:2]:
+            dom = _DU.clean_company_domain(
+                ((claim.get('mainsnak') or {}).get('datavalue') or {}).get('value') or '')
+            if dom and dom not in out:
+                out.append(dom)
+        if out:
+            break
+    return out
+
+
+def _short_name_candidates(company, key):
+    """`fyntune.com` for "FynTune Solution Pvt Ltd" — the brand word alone.
+
+    Candidates were built only from the FULL name slug (`fyntunesolution.com`,
+    `anvenssaconsultancy.com`), but many real sites use just the brand word:
+    fyntune.com and anvenssa.com both exist and both pass corroboration. Offered
+    only for distinctive words of 6+ letters that are not common English, and tried
+    AFTER the full-slug candidates, so a specific match always wins.
+    """
+    toks = _DU.distinctive_tokens(company)
+    if not toks:
+        return []
+    t = toks[0].lower()
+    if (len(t) < 6 or t in _COMMON_FIRST_WORDS or t in _DU.GENERIC_NAME_WORDS
+            or t == key.replace('-', '')):
+        return []
+    return [f'{t}.com', f'{t}.in']
+
+
 def _guess_domain(company):
     if not company: return ''
     name = re.sub(
@@ -985,11 +1340,33 @@ def _is_hr(email):
     return any(k in email.lower().split('@')[0] for k in HR_KEYWORDS)
 
 
+# Addresses that are NEVER a placement contact. Found in a live run: UniAcco's
+# ethics@ (a whistleblower hotline) was ranked as an outreach address and auto-saved
+# to the HR database labelled "HR". A placement email to an ethics or legal desk is
+# worse than no email. sales@ / info@ / contact@ are deliberately NOT here — at a
+# small firm they reach a person who forwards.
+_NEVER_OUTREACH = {
+    'ethics', 'legal', 'privacy', 'abuse', 'compliance', 'grievance', 'grievances',
+    'investor', 'investors', 'ir', 'investorrelations', 'press', 'media', 'pr',
+    'security', 'dpo', 'dataprotection', 'gdpr', 'webmaster', 'postmaster',
+    'hostmaster', 'billing', 'accounts', 'accountspayable', 'procurement', 'vendor',
+    'vendors', 'purchase', 'purchasing', 'whistleblower', 'unsubscribe', 'dmca',
+    'copyright', 'fraud', 'phishing', 'cookies', 'nodal', 'nodalofficer',
+}
+_NO_REPLY = ('noreply', 'no-reply', 'no_reply', 'donotreply', 'do-not-reply')
+
+
+def _never_outreach(email):
+    local = (email or '').split('@')[0].lower()
+    return local in _NEVER_OUTREACH or local.startswith(_NO_REPLY)
+
+
 def _filter_emails(emails):
     seen, out = set(), []
     for e in emails:
         el = e.lower()
         if not _is_valid_email(e): continue
+        if _never_outreach(e): continue
         if el not in seen:
             seen.add(el)
             out.append(e)
@@ -1007,7 +1384,11 @@ def _filter_phones(phones):
         d = re.sub(r'[^\d]', '', str(p))
         if len(d) == 12 and d.startswith('91'): d = d[2:]
         if len(d) == 13 and d.startswith('091'): d = d[3:]
-        if not _valid_india_mobile(d): continue
+        if len(d) == 11 and d.startswith('0'): d = d[1:]
+        # FINAL gate. It re-applied the mobile-only rule, so a landline accepted at
+        # extraction would have been silently dropped here. Landlines reaching this
+        # point already passed the formatting guard in _valid_india_landline.
+        if not (_valid_india_mobile(d) or _is_india_fixed_line(d)): continue
         if d not in seen:
             seen.add(d)
             result.append(_format_phone(d))

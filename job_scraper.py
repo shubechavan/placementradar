@@ -13,6 +13,11 @@ import requests, json, re, time
 from bs4 import BeautifulSoup
 from urllib.parse import quote
 
+# Instrumentation (brief §G). Imports no database, so bench isolation holds.
+import source_metrics as _SM
+# 200-with-wrong-content guard (see response_guard.py). No database import.
+import response_guard
+
 JOBSPY_SITES = {'linkedin', 'indeed', 'glassdoor', 'zip_recruiter'}
 
 HEADERS = {
@@ -51,7 +56,19 @@ TECH_TITLE_KEYWORDS = {
     'node.js','react','angular','vue','django','spring','dotnet','.net',
     'blockchain','web3','salesforce','erp','sap','oracle developer',
     'database admin','dba','sql developer',
-    'intern','trainee','graduate engineer','fresher',
+    'graduate engineer',
+    # Design roles are tech roles here — a placement committee places them. These were
+    # being DROPPED: "UX/UI Designer" matched neither 'ui developer' nor 'ux engineer'.
+    # Bare 'ui'/'ux' are NOT listed: as substrings they match "building", "guide",
+    # "luxury". Every entry below is long enough to be unambiguous.
+    'designer','ux/ui','ui/ux','ux design','ui design','product design',
+    'web design','interaction design','visual design','user experience',
+    'user interface','figma',
+    # REMOVED: 'intern', 'trainee', 'fresher'.
+    # Those are SENIORITY words, not domain words, and they sat in a domain list — so
+    # "Management Trainee - Marketing & Sales" was classified as a tech role while a
+    # "UX/UI Designer" was discarded. Nothing is lost by removing them: a genuine
+    # "Software Engineering Intern" still matches on 'software' and 'engineer'.
 }
 
 NON_TECH_TITLE_KEYWORDS = {
@@ -61,6 +78,14 @@ NON_TECH_TITLE_KEYWORDS = {
     'hr executive','hr manager','recruiter','talent acquisition',
     'marketing executive','digital marketing','seo executive','content writer',
     'graphic designer','video editor',
+    # Non-tech design disciplines. Listed explicitly because 'designer' is now a tech
+    # keyword, and the deny-list is evaluated FIRST — so these still resolve to False.
+    'fashion design','interior design','jewellery design','jewelry design',
+    'textile design','set design',
+    # NOT added: bare 'sales' / 'marketing'. Matching is substring-based, so 'sales'
+    # would reject "Salesforce Developer" — and the deny-list wins. Once 'trainee' is
+    # out of the tech list, "Management Trainee - Marketing & Sales" matches no tech
+    # keyword at all and is dropped without needing a deny entry.
     'logistics','supply chain','warehouse','delivery',
     'teacher','faculty','professor','counsellor',
     'customer service','customer care','relationship manager',
@@ -77,6 +102,14 @@ def _is_tech_role(title: str) -> bool:
         if kw in t:
             return True
     return False
+
+
+def _matches_terms(search_term: str, *fields) -> bool:
+    """True when every word of the search appears somewhere in the fields (word order
+    and phrasing free), for boards whose own search ignores the query."""
+    text = ' '.join(f or '' for f in fields).lower()
+    words = [w for w in re.findall(r'[a-z0-9+#.]+', (search_term or '').lower()) if len(w) > 1]
+    return all(w in text for w in words)
 
 
 def scrape_jobs(params, progress_callback=None):
@@ -123,42 +156,10 @@ def scrape_jobs(params, progress_callback=None):
         tasks['google_jobs'] = lambda: scrape_google_jobs(
             search_term, location, api_key=serper_key, count=per_site_count)
 
-    # JobSpy (LinkedIn/Indeed/Glassdoor/ZipRecruiter)
-    if jobspy_sites:
-        def _jobspy_task():
-            try:
-                from jobspy import scrape_jobs as jobspy_scrape
-                df = jobspy_scrape(
-                    site_name=jobspy_sites,
-                    search_term=search_term,
-                    location=location,
-                    results_wanted=per_site_count,
-                    hours_old=168,
-                    country_indeed='India',
-                    linkedin_fetch_description=False,
-                )
-                out = []
-                if df is not None and not df.empty:
-                    for _, row in df.iterrows():
-                        sal = ''
-                        if row.get('min_amount') and str(row['min_amount']) not in ('nan',''):
-                            sal = f"{row.get('min_amount','')}-{row.get('max_amount','')}"
-                        out.append(_job(
-                            str(row.get('title','') or ''),
-                            str(row.get('company','') or ''),
-                            str(row.get('location','') or ''),
-                            str(row.get('job_type','') or ''),
-                            sal,
-                            str(row.get('description','') or ''),
-                            str(row.get('job_url','') or ''),
-                            str(row.get('site','') or ''),
-                            str(row.get('company_url','') or ''),
-                        ))
-                return out
-            except Exception as e:
-                print(f'[JobSpy] {e}')
-                return []
-        tasks['jobspy'] = _jobspy_task
+    # JobSpy (LinkedIn/Indeed/Glassdoor/ZipRecruiter): one task per board, so a slow or
+    # blocked board neither delays nor hides the others, and each gets its own health row.
+    for js_site in jobspy_sites:
+        tasks[js_site] = lambda s=js_site: scrape_jobspy(s, search_term, location, per_site_count)
 
     # Indian sites
     indian_fns = {
@@ -202,6 +203,10 @@ def scrape_jobs(params, progress_callback=None):
         tasks[f'custom:{name}'] = lambda c=cs: scrape_custom_site(
             c, search_term, location, per_site_count)
 
+    # Every board reports to source health. A board that returns nothing is recorded as
+    # a failure, not a success: "0 jobs, no error" is how 14 of 19 boards died unnoticed.
+    tasks = {label: _tracked_board(label, fn) for label, fn in tasks.items()}
+
     # ── Run all tasks in parallel ──────────────────────────────────────────
     total_tasks = len(tasks)
     done_count  = [0]
@@ -243,6 +248,69 @@ def scrape_jobs(params, progress_callback=None):
     return results
 
 
+def _tracked_board(label, fn):
+    """Wrap one board's scrape so source health sees it: attempt, latency, and either a
+    success (with the job count) or a failure. Exceptions are recorded and re-raised."""
+    sid = 'board:' + label
+    def run():
+        _SM.record_attempt(sid)
+        t0 = time.time()
+        try:
+            rows = fn() or []
+        except Exception as e:
+            _SM.record_failure(sid, e)
+            raise
+        finally:
+            _SM.record_latency(sid, (time.time() - t0) * 1000.0)
+        if rows:
+            _SM.record_success(sid, len(rows))
+        else:
+            _SM.record_failure(sid, RuntimeError('no jobs returned'))
+        return rows
+    return run
+
+
+# ── JOBSPY (LinkedIn / Indeed / Glassdoor / ZipRecruiter) ─────────────────────
+def scrape_jobspy(site, search_term, location, count=20):
+    """One board through python-jobspy. Errors propagate so the caller can report them;
+    the old version printed and returned [], which looked exactly like "no jobs".
+
+    Measured 26 Oct 2026 (3 searches, Mumbai/Pune/Bangalore): Indeed returned 25 jobs
+    with full descriptions in about 1 s; LinkedIn 25 jobs without descriptions in about
+    12 s. LinkedIn descriptions stay off: they cost about 1 s per job and the 30 fetched
+    in testing held one email between them."""
+    from jobspy import scrape_jobs as jobspy_scrape
+    df = jobspy_scrape(
+        site_name=[site],
+        search_term=search_term,
+        location=location,
+        results_wanted=count,
+        hours_old=168,
+        country_indeed='India',
+        linkedin_fetch_description=False,
+        verbose=0,
+    )
+    out = []
+    if df is not None and not df.empty:
+        for _, row in df.iterrows():
+            sal = ''
+            if row.get('min_amount') and str(row['min_amount']) not in ('nan', ''):
+                sal = f"{row.get('min_amount','')}-{row.get('max_amount','')}"
+            desc = row.get('description', '')
+            out.append(_job(
+                str(row.get('title', '') or ''),
+                str(row.get('company', '') or ''),
+                str(row.get('location', '') or ''),
+                str(row.get('job_type', '') or ''),
+                sal,
+                '' if str(desc) == 'nan' else str(desc or ''),
+                str(row.get('job_url', '') or ''),
+                str(row.get('site', '') or site),
+                str(row.get('company_url', '') or ''),
+            ))
+    return out
+
+
 # ── INTERNSHALA ───────────────────────────────────────────────────────────────
 _IS_BADGE_RE = re.compile(
     r'(Actively\s*hiring|Urgently\s*hiring|Featured|Verified|Premium|New|Hot|'
@@ -261,19 +329,67 @@ def _clean_company_name(el):
     return re.sub(r'\s{2,}', ' ', text).strip()
 
 def scrape_internshala(search_term, location, count=20):
+    """Internshala jobs/internships.
+
+    TWO GATES, because this source answers 200 to a question it did not read.
+
+    `internshala.com/jobs/<slug>-jobs` exists only when `<slug>` is a real Internshala
+    category. When it is not, the site **redirects to `/jobs/`** — the generic
+    16,141-job listing — and serves it at HTTP 200. The scraper parsed that page and
+    returned "Sales Associate" and "Business Development Manager" for a search of
+    "software engineer". `data-scientist-jobs` IS a category, so the same code looked
+    fine whenever the term happened to match one.
+
+    Worse, the candidate URLs were tried in order and the loop stopped at the first
+    that produced rows — so the broken `-jobs` slug, "succeeding" with garbage,
+    preempted `keywords-<slug>`, which always honours the term.
+
+    ORDER: the category slug is still tried FIRST, because when the category exists it
+    is strictly more precise — measured across five terms, category vs keywords scored
+    100%/100%/69% against 77%/46%/62% relevance. Reordering to put `keywords-` first
+    fixes "software engineer" but degrades every term whose category does exist
+    ("data scientist" fell from 6 clean hits to 50% relevance). The gates below are
+    what make category-first safe: when the slug is not a real category the redirect is
+    caught and the loop falls through to `keywords-`, which is always present.
+    """
     results = []
     try:
         slug = re.sub(r'[^a-z0-9]+', '-', search_term.strip().lower()).strip('-')
-        for url in [
+
+        # LOCATION WAS BEING DISCARDED. `location` was accepted, used only as a
+        # fallback display value, and never reached a URL — so a committee in Mumbai
+        # searching "Mumbai" got the same all-India list as everyone else. Measured
+        # consequence: of 314 companies in the corpus, THREE were Mumbai-based.
+        #
+        # Internshala does support it: `/jobs/<slug>-jobs-in-mumbai` returns
+        # "40 Software Engineer Jobs in Mumbai" at 200 with no redirect. City-scoped
+        # URLs are tried FIRST; the redirect and relevance gates below handle the case
+        # where a city or term has no such page and the site falls back to a generic
+        # listing. `india` is skipped — it is the whole-country default, not a city.
+        loc = re.sub(r'[^a-z0-9]+', '-', (location or '').strip().lower()).strip('-')
+        loc = loc.split('-')[0] if loc else ''      # "mumbai-maharashtra" -> "mumbai"
+        candidates = []
+        if loc and loc not in ('india', 'remote', 'anywhere', ''):
+            candidates.append(f"https://internshala.com/jobs/{slug}-jobs-in-{loc}")
+        candidates += [
             f"https://internshala.com/jobs/{slug}-jobs",
-            f"https://internshala.com/internships/{slug}-internship",
             f"https://internshala.com/jobs/keywords-{slug}",
-        ]:
-            resp = requests.get(url, headers=HEADERS, timeout=8)
+            f"https://internshala.com/internships/{slug}-internship",
+        ]
+        for url in candidates:
+            resp = requests.get(url, headers=HEADERS, timeout=8, allow_redirects=True)
             if resp.status_code != 200: continue
+            # GATE 1 — did the server quietly move us to a catch-all listing?
+            is_generic, why = response_guard.redirected_to_generic(
+                url, getattr(resp, 'url', url),
+                generic_paths=('/jobs', '/internships'))
+            if is_generic:
+                _SM.record_failure('internshala', RuntimeError(f'off-query: {why}'), url=url)
+                continue
             soup = BeautifulSoup(resp.text, 'lxml')
             cards = soup.select('.individual_internship')
             if not cards: cards = soup.select('[class*="internship_meta"]')
+            page_rows = []
             for card in cards[:count]:
                 title   = (_text(card, '.job-internship-name, .heading_4_5') or
                            _text(card, 'h3, [class*="heading"]'))
@@ -289,9 +405,20 @@ def scrape_internshala(search_term, location, count=20):
                     href = link['href']
                     if href.startswith('/'): href = 'https://internshala.com' + href
                 if title and company:
-                    results.append(_job(title, company, loc_t, 'Internship/FT', stipend, '', href, 'internshala'))
+                    page_rows.append(_job(title, company, loc_t, 'Internship/FT', stipend, '', href, 'internshala'))
+            # GATE 2 — does this page actually answer the query? A generic listing
+            # that slipped past gate 1 still scores ~0% relevance and is discarded
+            # here rather than returned as a result.
+            bad, detail = response_guard.off_query(
+                [r.get('title', '') for r in page_rows], search_term)
+            if bad:
+                _SM.record_failure('internshala',
+                                   RuntimeError(f'off-query content: {detail}'), url=url)
+                continue
+            results.extend(page_rows)
             if results: break
-    except Exception: pass
+    except Exception as _e:
+        _SM.record_failure('internshala', _e)
     return results[:count]
 
 
@@ -323,6 +450,10 @@ def scrape_naukri(search_term, location, count=20):
             },
             timeout=15
         )
+        if r.status_code != 200:
+            # 406 "recaptcha required" since at least Oct 2026: record it, so health
+            # shows Naukri as blocked instead of empty.
+            _SM.record_http('board:naukri', r.status_code)
         if r.status_code == 200:
             jobs = r.json().get('jobDetails', [])
             for j in jobs[:count]:
@@ -374,7 +505,8 @@ def scrape_naukri(search_term, location, count=20):
                                 results.append(_job(title, company, loc_t, 'Full-time', '', '', href, 'naukri'))
                         break
 
-    except Exception: pass
+    except Exception as e:
+        _SM.record_failure('board:naukri', e)
     return results[:count]
 
 
@@ -840,6 +972,10 @@ def scrape_remotive(search_term, location='', count=20):
         if r.status_code != 200:
             return results
         jobs = r.json().get('jobs', [])
+        # The API ignores `search` (Oct 2026: the same 10 jobs for any term), so keep
+        # only jobs whose title or tags carry every word of the search.
+        jobs = [j for j in jobs
+                if _matches_terms(search_term, j.get('title', ''), ' '.join(j.get('tags') or []))]
         for j in jobs[:count]:
             geo = j.get('candidate_required_location', 'Worldwide')
             results.append(_job(
@@ -851,7 +987,8 @@ def scrape_remotive(search_term, location='', count=20):
                 j.get('description', '')[:800],
                 j.get('url', ''),
                 'remotive',
-                j.get('company_logo', ''),
+                # No company_url: the only company link here is the LOGO image, which was
+                # being stored as the website (inflating the grade, misleading the crawler).
             ))
     except Exception as e:
         print(f'[Remotive] {e}')
@@ -866,28 +1003,22 @@ def scrape_remoteok(search_term, location='', count=20):
     """
     results = []
     try:
-        r = requests.get(
-            f'https://remoteok.com/api?tags={quote(search_term)}',
-            headers={**HEADERS, 'Accept': 'application/json'},
-            timeout=8,
-        )
+        # The `?tags=` form answered 200 with only the legal notice, so the fallback never
+        # ran and every search returned 0. Fetch the full feed and filter it here.
+        r = requests.get('https://remoteok.com/api',
+                         headers={**HEADERS, 'Accept': 'application/json'}, timeout=12)
         if r.status_code != 200:
-            # Fallback: fetch all and filter
-            r = requests.get('https://remoteok.com/api',
-                             headers={**HEADERS, 'Accept': 'application/json'}, timeout=8)
-        if r.status_code != 200:
+            _SM.record_http('board:remoteok', r.status_code)
             return results
 
         data = r.json()
         # First item is always a legal notice, skip it
         jobs = [j for j in data if isinstance(j, dict) and j.get('position')]
 
-        kw = search_term.lower()
-        matched = []
-        for j in jobs:
-            text = f"{j.get('position','')} {j.get('tags','')} {j.get('description','')}".lower()
-            if kw in text or not kw:
-                matched.append(j)
+        # Every word of the search must appear in the title or tags. The old test looked
+        # for the whole phrase ("software engineer") and missed "Senior Engineer, Software".
+        matched = [j for j in jobs
+                   if _matches_terms(search_term, j.get('position', ''), ' '.join(j.get('tags') or []))]
 
         for j in matched[:count]:
             salary = ''
@@ -902,7 +1033,7 @@ def scrape_remoteok(search_term, location='', count=20):
                 (j.get('description') or '')[:800],
                 f"https://remoteok.com/remote-jobs/{j.get('slug', '')}",
                 'remoteok',
-                j.get('company_logo', ''),
+                # company_logo is an image, not the company's website; leave the URL empty.
             ))
     except Exception as e:
         print(f'[RemoteOK] {e}')
@@ -1007,35 +1138,35 @@ def scrape_himalayas(search_term, location='', count=20):
     """
     results = []
     try:
+        # `/jobs/api` ignores `q` and returns the latest jobs; `/jobs/api/search` searches.
         r = requests.get(
-            'https://himalayas.app/jobs/api',
-            params={
-                'q':         search_term,
-                'limit':     min(count, 30),
-                'offset':    0,
-            },
+            'https://himalayas.app/jobs/api/search',
+            params={'q': search_term, 'limit': min(count, 30)},
             headers={**HEADERS, 'Accept': 'application/json'},
-            timeout=8,
+            timeout=15,   # the search endpoint is slower than the feed
         )
+        if r.status_code != 200:
+            _SM.record_http('board:himalayas', r.status_code)
         if r.status_code == 200:
             data = r.json()
             jobs = data.get('jobs', [])
             for j in jobs[:count]:
-                company = (j.get('company') or {}).get('name', '')
-                co_url  = (j.get('company') or {}).get('website', '')
+                # The API returns flat `companyName`; reading `company.name` left every
+                # company blank (Oct 2026 audit: 20 jobs, 0 companies).
+                company = j.get('companyName', '')
                 salary  = ''
                 if j.get('minSalary'):
                     salary = f"${j['minSalary']:,}–${j.get('maxSalary', j['minSalary']):,}"
+                locs = j.get('locationRestrictions') or []
                 results.append(_job(
                     j.get('title', ''),
                     company,
-                    j.get('locations', 'Remote'),
-                    j.get('jobType', ''),
+                    ', '.join(locs) if isinstance(locs, list) and locs else 'Remote',
+                    j.get('employmentType', ''),
                     salary,
                     (j.get('description') or '')[:800],
-                    j.get('applicationLink') or f"https://himalayas.app/jobs/{j.get('slug','')}",
+                    j.get('applicationLink') or f"https://himalayas.app/companies/{j.get('companySlug','')}",
                     'himalayas',
-                    co_url,
                 ))
     except Exception as e:
         print(f'[Himalayas] {e}')
@@ -1095,8 +1226,8 @@ def scrape_wellfound(search_term, location='', count=20):
                         ))
                         if len(results) >= count:
                             break
-                except Exception:
-                    pass
+                except Exception as _e:
+                    _SM.record_failure('wellfound', _e)
 
             if results:
                 break
@@ -1181,8 +1312,8 @@ def scrape_yc_startup(search_term, location='', count=20):
                     ))
                 if results:
                     break
-            except Exception:
-                pass
+            except Exception as _e:
+                _SM.record_failure('yc_startup', _e)
 
         # HTML fallback
         if not results:
@@ -1494,8 +1625,8 @@ def scrape_turing(search_term, location='', count=20):
                     if title:
                         results.append(_job(title, company, loc_t, 'remote', str(salary), '', href, 'turing'))
                 if results: return results[:count]
-            except Exception:
-                pass
+            except Exception as _e:
+                _SM.record_failure('turing', _e)
 
         # Fallback: HTML card scraping
         cards = (soup.select('[class*="job-card"]') or
@@ -1566,8 +1697,8 @@ def scrape_upwork(search_term, location='', count=20):
                     if title:
                         results.append(_job(title, company, loc_t, 'contract', salary, desc, href, 'upwork'))
                 if results: return results[:count]
-            except Exception:
-                pass
+            except Exception as _e:
+                _SM.record_failure('upwork', _e)
 
         # HTML fallback
         cards = (soup.select('article[data-test="JobTile"]') or

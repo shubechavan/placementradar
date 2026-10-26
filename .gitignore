@@ -1,12 +1,15 @@
 # Secrets — never commit these
 .env
 .env.*
+*.env
 !.env.example
 
 # Local data backups — contain real HR emails & phone numbers, NEVER commit
 restored data/
 *.csv
 !hr_database.csv
+# Working notes — quote real recruiter contacts, NEVER commit
+NOTES.md
 # One-off local recovery scripts (kept locally, not shipped)
 restore_from_csv.py
 rebuild_data.py

@@ -1,0 +1,47 @@
+/* PlacementRadar design tokens.
+   The palette is closed: five named colours plus two signal colours.
+   Anything else is a transparency of Ink, never a new hue. */
+
+@font-face { font-family: "Atkinson Hyperlegible Next"; font-weight: 400; font-style: normal; font-display: swap;
+  src: url("/static/fonts/atkinson-hyperlegible-next-latin-400-normal.woff2") format("woff2"); }
+@font-face { font-family: "Atkinson Hyperlegible Next"; font-weight: 500; font-style: normal; font-display: swap;
+  src: url("/static/fonts/atkinson-hyperlegible-next-latin-500-normal.woff2") format("woff2"); }
+@font-face { font-family: "Atkinson Hyperlegible Next"; font-weight: 600; font-style: normal; font-display: swap;
+  src: url("/static/fonts/atkinson-hyperlegible-next-latin-600-normal.woff2") format("woff2"); }
+@font-face { font-family: "Atkinson Hyperlegible Next"; font-weight: 700; font-style: normal; font-display: swap;
+  src: url("/static/fonts/atkinson-hyperlegible-next-latin-700-normal.woff2") format("woff2"); }
+
+:root {
+  /* Named palette */
+  --ink:    #15213B;   /* text, icons, focus ring */
+  --slate:  #5A6577;   /* secondary text (5.9:1 on Sheet) */
+  --sheet:  #FFFFFF;   /* the work surface */
+  --chalk:  #F2F4F6;   /* rail and table header band only */
+  --rule:   #DCE1E7;   /* hairlines between rows */
+  --gold:   #E8A020;   /* KJSIM gold: fills only (2.2:1 on white, never text) */
+  --brass:  #8A5A00;   /* gold when it has to be text or an outline (5.9:1) */
+  --green:  #1E7048;   /* signal: good outcome, grade A/B */
+  --rust:   #A8402A;   /* signal: lost, overdue */
+
+  /* Derived from Ink only */
+  --line:   rgba(21, 33, 59, .50);  /* control borders, 3.2:1 on Sheet */
+  --hover:  rgba(21, 33, 59, .05);
+  --press:  rgba(21, 33, 59, .09);
+  --scrim:  rgba(21, 33, 59, .42);
+  --brd:    var(--rule);            /* legacy alias from the old template */
+
+  /* Type: one family, tabular figures everywhere */
+  --font: "Atkinson Hyperlegible Next", "Segoe UI", system-ui, sans-serif;
+  --t-title: 700 22px/28px var(--font);
+  --t-head:  600 16px/22px var(--font);
+  --t-body:  400 14px/20px var(--font);
+  --t-small: 500 12px/16px var(--font);
+
+  /* Shape by hierarchy */
+  --r-control: 4px;   /* inputs, buttons, menus */
+  --r-layer:   10px;  /* dialogs, sheets, drawer */
+  --shadow-layer: 0 12px 32px rgba(21, 33, 59, .18), 0 1px 3px rgba(21, 33, 59, .12);
+
+  --rail-w: 232px;
+  --tap: 36px;        /* control height on desktop; 40px on touch, see app.css */
+}
