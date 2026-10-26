@@ -930,19 +930,21 @@ def export_csv():
 # ── HR Database ───────────────────────────────────────────────────────────────
 @app.route('/api/hr-database')
 def hr_database():
-    from hr_database_lookup import get_all, stats, search
+    # MongoDB's hr_contacts, not hr_database.csv: the CSV only ever showed what was
+    # committed, and live additions vanished at the next deploy (see hr_directory.py).
+    import hr_directory as HD
+    from database import _get_db
+    rows = HD.all_contacts(_get_db().hr_contacts)
     q = request.args.get('q','').strip()
-    if q:
-        rows = search(q)
-    else:
-        rows = get_all()
-    return jsonify({'contacts': rows, 'stats': stats()})
+    return jsonify({'contacts': HD.matching(rows, q), 'stats': HD.stats(rows)})
 
 @app.route('/api/hr-database/add', methods=['POST'])
 def hr_database_add():
-    from hr_database_lookup import add_entry
+    import hr_directory as HD
+    from database import _get_db
     data = request.json or {}
-    ok   = add_entry(
+    ok   = HD.add(
+        _get_db().hr_contacts,
         data.get('company',''), data.get('hr_email',''),
         data.get('hr_name',''), data.get('designation','HR'),
         data.get('city',''), 'Manual'
