@@ -10,6 +10,16 @@ restored data/
 !hr_database.csv
 # Working notes — quote real recruiter contacts, NEVER commit
 NOTES.md
+# Reports, drafts, slides and the college template stay on this computer: they
+# carry the student's name, and early drafts held unredacted contact screenshots.
+PROJECT_*.md
+PROJECT_*.docx
+PROJECT_*.pdf
+PROJECT_*.pptx
+PROJECT_*.html
+PPT Template*.pptx
+# Office lock files
+~$*
 # One-off local recovery scripts (kept locally, not shipped)
 restore_from_csv.py
 rebuild_data.py
