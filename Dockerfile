@@ -18,6 +18,9 @@ RUN pip install --no-cache-dir -r requirements.txt gunicorn
 # files out of the image. Secrets are injected via env vars at runtime.
 COPY *.py ./
 COPY templates/ ./templates/
+# The single-page app's CSS, JS, fonts and vendored React. Without it the page
+# shell loads but every asset 404s and the site renders blank.
+COPY static/ ./static/
 COPY hr_database.csv ./
 
 # Non-root user (security best practice)
