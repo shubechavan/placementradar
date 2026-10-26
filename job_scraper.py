@@ -307,8 +307,18 @@ def scrape_jobspy(site, search_term, location, count=20):
                 str(row.get('job_url', '') or ''),
                 str(row.get('site', '') or site),
                 str(row.get('company_url', '') or ''),
+                date_posted=_iso_date(row.get('date_posted')),
             ))
     return out
+
+
+def _iso_date(value) -> str:
+    """'YYYY-MM-DD' for the day a board says it posted a job, '' when it gave none.
+    JobSpy returns a date, or NaN/NaT/None for a listing that showed no date."""
+    if value is None or value != value:          # NaN and NaT are not equal to themselves
+        return ''
+    s = value.isoformat() if hasattr(value, 'isoformat') else str(value)
+    return s[:10] if re.match(r'\d{4}-\d{2}-\d{2}', s) else ''
 
 
 # ── INTERNSHALA ───────────────────────────────────────────────────────────────
@@ -753,7 +763,8 @@ def scrape_google_jobs(search_term, location='India', api_key='', count=20):
     return results[:count]
 
 
-def _job(title, company, location, job_type, salary, desc, url, site, company_url=''):
+def _job(title, company, location, job_type, salary, desc, url, site, company_url='',
+         date_posted=''):
     return {
         'title':        (title or '').strip(),
         'company':      (company or '').strip(),
@@ -763,7 +774,7 @@ def _job(title, company, location, job_type, salary, desc, url, site, company_ur
         'description':  (desc or '').strip(),
         'job_url':      (url or '').strip(),
         'site':         site,
-        'date_posted':  '',
+        'date_posted':  date_posted or '',
         'company_url':  (company_url or '').strip(),
         'emails':       '',
         'phone':        '',

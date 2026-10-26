@@ -1,3 +1,6 @@
+from datetime import date, datetime
+
+import pandas as pd
 import pytest
 
 import job_scraper as J
@@ -26,6 +29,32 @@ def test_matches_terms(term, fields, expected):
 ])
 def test_is_tech_role(title, expected):
     assert J._is_tech_role(title) is expected
+
+
+@pytest.mark.parametrize('value, expected', [
+    (date(2026, 10, 24), '2026-10-24'),
+    (datetime(2026, 10, 24, 13, 5), '2026-10-24'),
+    ('2026-10-24', '2026-10-24'),
+    (None, ''),
+    (float('nan'), ''),                          # pandas fills a missing date with NaN or NaT
+    (pd.NaT, ''),
+    ('nan', ''),
+])
+def test_iso_date(value, expected):
+    assert J._iso_date(value) == expected
+
+
+def test_jobspy_keeps_the_date_the_board_posted_the_job(monkeypatch):
+    import jobspy
+    df = pd.DataFrame([
+        {'title': 'Data Analyst', 'company': 'Acme', 'job_url': 'https://jobs.example/1',
+         'site': 'indeed', 'date_posted': date(2026, 10, 24)},
+        {'title': 'Java Developer', 'company': 'Beta', 'job_url': 'https://jobs.example/2',
+         'site': 'linkedin', 'date_posted': None},
+    ])
+    monkeypatch.setattr(jobspy, 'scrape_jobs', lambda **kw: df)
+    rows = J.scrape_jobspy('indeed', 'data analyst', 'Mumbai', 5)
+    assert [r['date_posted'] for r in rows] == ['2026-10-24', '']
 
 
 def test_tracked_board_counts_empty_result_as_failure():

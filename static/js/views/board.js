@@ -17,9 +17,10 @@ const SITE_NAMES = {
 };
 export const siteName = (s) => SITE_NAMES[s] || (s ? s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g, ' ') : '');
 const CONTACT_FILTERS = [['', 'Any contact'], ['any', 'Has phone or email'], ['phone', 'Has phone'], ['email', 'Has email'], ['none', 'No contact yet']];
+const NEWEST_FIRST = ['added', 'posted'];   // date columns sort newest first
 
 function csvOf(rows) {
-  const cols = ['company', 'title', 'location', 'phone', 'emails', 'hr_contact', 'status', 'site', 'job_url', 'created_at'];
+  const cols = ['company', 'title', 'location', 'phone', 'emails', 'hr_contact', 'status', 'site', 'job_url', 'date_posted', 'created_at'];
   const q = (v) => '"' + String(v ?? '').replace(/"/g, '""') + '"';
   return '﻿' + [cols.join(','), ...rows.map((r) => cols.map((c) => q(r[c])).join(','))].join('\r\n');
 }
@@ -34,7 +35,7 @@ export function Board({ user, params, setParams }) {
   const [enrich, setEnrich] = useState(null);    // background "Find contacts" progress
 
   const q = params.q || '', status = params.status || '', site = params.site || '', contact = params.contact || '';
-  const sort = params.sort || 'added', dir = params.dir || (sort === 'added' ? 'desc' : 'asc');
+  const sort = params.sort || 'added', dir = params.dir || (NEWEST_FIRST.includes(sort) ? 'desc' : 'asc');
   const page = Math.max(1, parseInt(params.page || '1', 10) || 1);
   const set = (patch) => setParams({ ...params, page: '', ...patch });
 
@@ -65,6 +66,7 @@ export function Board({ user, params, setParams }) {
       grade: (r) => GRADE_ORDER[r._g],
       status: (r) => STATUSES.findIndex(([k]) => k === (r.status || 'new')),
       added: (r) => r.created_at || '',
+      posted: (r) => r.date_posted || '',
     }[sort] || ((r) => r.created_at || '');
     const m = dir === 'desc' ? -1 : 1;
     return [...out].sort((a, b) => (key(a) < key(b) ? -m : key(a) > key(b) ? m : 0));
@@ -90,7 +92,7 @@ export function Board({ user, params, setParams }) {
 
   function sortBy(k) {
     if (sort === k) set({ dir: dir === 'asc' ? 'desc' : 'asc', sort: k });
-    else set({ sort: k, dir: k === 'added' ? 'desc' : 'asc' });
+    else set({ sort: k, dir: NEWEST_FIRST.includes(k) ? 'desc' : 'asc' });
   }
   const sortIcon = (k) => (sort === k ? (dir === 'asc' ? 'up' : 'down') : 'sort');
   const ariaSort = (k) => (sort === k ? (dir === 'asc' ? 'ascending' : 'descending') : 'none');
@@ -216,7 +218,8 @@ export function Board({ user, params, setParams }) {
           <th>Phone</th><th>Email</th><th>Role</th>
           <th aria-sort=${ariaSort('status')}><button type="button" className="sort" onClick=${() => sortBy('status')}>Status <${Icon} name=${sortIcon('status')} size=${14} /></button></th>
           <th className="c-src">Source</th>
-          <th className="c-date" aria-sort=${ariaSort('added')}><button type="button" className="sort" onClick=${() => sortBy('added')}>Added <${Icon} name=${sortIcon('added')} size=${14} /></button></th>
+          <th className="c-date" aria-sort=${ariaSort('posted')}><button type="button" className="sort" title="When the job board listed the job" onClick=${() => sortBy('posted')}>Posted <${Icon} name=${sortIcon('posted')} size=${14} /></button></th>
+          <th className="c-date" aria-sort=${ariaSort('added')}><button type="button" className="sort" title="When PlacementRadar saved the job" onClick=${() => sortBy('added')}>Added <${Icon} name=${sortIcon('added')} size=${14} /></button></th>
         </tr></thead>
         <tbody>${rows.map((r) => {
           const ph = phones(r), em = primaryEmail(r);
@@ -233,6 +236,7 @@ export function Board({ user, params, setParams }) {
             <td className="c-role"><div title=${r.title}>${r.title || html`<span className="dash">Not listed</span>`}</div><div className="muted small">${r.location || ''}</div></td>
             <td><${StatusSelect} value=${r.status} label=${'Status for ' + (r.company || 'job')} onChange=${(v) => changeStatus(r, v)} /></td>
             <td className="c-src">${siteName(r.site)}</td>
+            <td className="c-date">${shortDate(r.date_posted)}</td>
             <td className="c-date" title=${dateTime(r.created_at)}>${shortDate(r.created_at)}</td>
           </tr>`; })}
         </tbody></table></div>
@@ -272,7 +276,7 @@ function JobPanel({ job, onClose, onStatus, onLog, onEmail, onPatched }) {
     catch (e) { toast(`Rating not saved. ${e.message}`, 'error'); }
   }
   async function copy(v) { toast((await copyText(v)) ? `Copied ${v}` : 'Copy failed.', 'info'); }
-  const ph = phones(job), em = emails(job), url = safeUrl(job.job_url), g = job._g || grade(job);
+  const ph = phones(job), em = emails(job), url = safeUrl(job.job_url), g = job._g || grade(job), posted = shortDate(job.date_posted);
 
   return html`<${Panel} title=${job.company || 'Unnamed company'} onClose=${onClose} lead=${html`<${Grade} g=${g} />`}>
     <div className="panel-actions">
@@ -297,6 +301,7 @@ function JobPanel({ job, onClose, onStatus, onLog, onEmail, onPatched }) {
       ${job.email_source && html`<dt>Found via</dt><dd>${String(job.email_source).replace(/[^\w .,&()-]/g, '').trim()}</dd>`}
       ${job.assigned_name && html`<dt>Owner</dt><dd>${job.assigned_name}</dd>`}
       <dt>Source</dt><dd>${siteName(job.site) || 'Unknown'}</dd>
+      ${posted && html`<dt>Posted</dt><dd>${posted}</dd>`}
       <dt>Added</dt><dd>${dateTime(job.created_at) || 'Unknown'}</dd>
       <dt><label for="jp-score">Rating</label></dt><dd>
         <select id="jp-score" className="select" value=${String(job.score || 0)} onChange=${(e) => saveScore(e.target.value)}>
