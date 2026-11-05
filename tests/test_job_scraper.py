@@ -39,6 +39,7 @@ def test_is_tech_role(title, expected):
     (float('nan'), ''),                          # pandas fills a missing date with NaN or NaT
     (pd.NaT, ''),
     ('nan', ''),
+    (1793883611, '2026-11-05'),                  # Himalayas sends Unix seconds
 ])
 def test_iso_date(value, expected):
     assert J._iso_date(value) == expected
@@ -78,18 +79,20 @@ def test_remoteok_filters_by_words_and_leaves_company_url_empty(fake_get):
     feed = [
         {'legal': 'notice'},
         {'position': 'Senior Engineer, Software', 'company': 'Acme', 'tags': ['python'],
-         'company_logo': 'https://img.example/logo.png', 'slug': 'a'},
+         'company_logo': 'https://img.example/logo.png', 'slug': 'a', 'date': '2026-11-04T15:09:09+00:00'},
         {'position': 'Account Manager', 'company': 'Other', 'tags': ['sales'], 'slug': 'b'},
     ]
     fake_get(lambda url, params: FakeResponse(200, feed))
     rows = J.scrape_remoteok('software engineer', '', 20)
     assert [r['company'] for r in rows] == ['Acme']
     assert rows[0]['company_url'] == ''          # the logo is not the website
+    assert rows[0]['date_posted'] == '2026-11-04'
 
 
 def test_himalayas_reads_flat_company_name(fake_get):
     payload = {'jobs': [{'title': 'Data Analyst', 'companyName': 'Acme', 'companySlug': 'acme',
-                         'locationRestrictions': ['India'], 'employmentType': 'Full Time'}]}
+                         'locationRestrictions': ['India'], 'employmentType': 'Full Time',
+                         'pubDate': 1793883611}]}
     seen = {}
 
     def handler(url, params):
@@ -99,14 +102,17 @@ def test_himalayas_reads_flat_company_name(fake_get):
     rows = J.scrape_himalayas('data analyst', '', 20)
     assert seen['url'].endswith('/jobs/api/search')
     assert rows[0]['company'] == 'Acme' and rows[0]['location'] == 'India'
+    assert rows[0]['date_posted'] == '2026-11-05'
 
 
 def test_remotive_drops_jobs_the_api_returned_off_query(fake_get):
-    payload = {'jobs': [{'title': 'Data Analyst', 'company_name': 'Acme', 'tags': []},
+    payload = {'jobs': [{'title': 'Data Analyst', 'company_name': 'Acme', 'tags': [],
+                         'publication_date': '2026-11-02T20:01:00'},
                         {'title': 'Remote Office Assistant', 'company_name': 'B', 'tags': []}]}
     fake_get(lambda url, params: FakeResponse(200, payload))
     rows = J.scrape_remotive('data analyst', '', 20)
     assert [r['company'] for r in rows] == ['Acme'] and rows[0]['company_url'] == ''
+    assert rows[0]['date_posted'] == '2026-11-02'
 
 
 def test_naukri_records_captcha_block(fake_get):

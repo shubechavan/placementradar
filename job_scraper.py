@@ -10,6 +10,7 @@ Scrapes jobs from:
 """
 
 import requests, json, re, time
+from datetime import datetime, timezone
 from bs4 import BeautifulSoup
 from urllib.parse import quote
 
@@ -314,9 +315,12 @@ def scrape_jobspy(site, search_term, location, count=20):
 
 def _iso_date(value) -> str:
     """'YYYY-MM-DD' for the day a board says it posted a job, '' when it gave none.
-    JobSpy returns a date, or NaN/NaT/None for a listing that showed no date."""
+    JobSpy returns a date, or NaN/NaT/None for a listing that showed no date; the remote
+    boards' feeds send an ISO string or, for Himalayas, Unix seconds."""
     if value is None or value != value:          # NaN and NaT are not equal to themselves
         return ''
+    if isinstance(value, (int, float)) and value > 1e9:
+        return datetime.fromtimestamp(value, timezone.utc).strftime('%Y-%m-%d')
     s = value.isoformat() if hasattr(value, 'isoformat') else str(value)
     return s[:10] if re.match(r'\d{4}-\d{2}-\d{2}', s) else ''
 
@@ -1000,6 +1004,7 @@ def scrape_remotive(search_term, location='', count=20):
                 'remotive',
                 # No company_url: the only company link here is the LOGO image, which was
                 # being stored as the website (inflating the grade, misleading the crawler).
+                date_posted=_iso_date(j.get('publication_date')),
             ))
     except Exception as e:
         print(f'[Remotive] {e}')
@@ -1045,6 +1050,7 @@ def scrape_remoteok(search_term, location='', count=20):
                 f"https://remoteok.com/remote-jobs/{j.get('slug', '')}",
                 'remoteok',
                 # company_logo is an image, not the company's website; leave the URL empty.
+                date_posted=_iso_date(j.get('date')),
             ))
     except Exception as e:
         print(f'[RemoteOK] {e}')
@@ -1178,6 +1184,7 @@ def scrape_himalayas(search_term, location='', count=20):
                     (j.get('description') or '')[:800],
                     j.get('applicationLink') or f"https://himalayas.app/companies/{j.get('companySlug','')}",
                     'himalayas',
+                    date_posted=_iso_date(j.get('pubDate')),
                 ))
     except Exception as e:
         print(f'[Himalayas] {e}')
