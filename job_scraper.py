@@ -10,7 +10,7 @@ Scrapes jobs from:
 """
 
 import requests, json, re, time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from bs4 import BeautifulSoup
 from urllib.parse import quote
 
@@ -330,6 +330,19 @@ _IS_BADGE_RE = re.compile(
     r'(Actively\s*hiring|Urgently\s*hiring|Featured|Verified|Premium|New|Hot|'
     r'Sponsored|Promoted|Top\s*Recruiter|Actively\s*recruiting)', re.I)
 
+_IS_POSTED_RE = re.compile(r'(today|just now|few hours ago|(\d+) days? ago)', re.I)
+
+
+def _internshala_posted(card, today=None):
+    """A card's 'Today', 'Few hours ago' or 'N days ago' label as YYYY-MM-DD. 'N weeks ago'
+    stays blank: a date from it would look exact but could be six days out."""
+    for el in card.select('[class*="status-"]'):
+        m = _IS_POSTED_RE.fullmatch(el.get_text(' ', strip=True))
+        if m:
+            return ((today or datetime.now().date()) - timedelta(days=int(m.group(2) or 0))).isoformat()
+    return ''
+
+
 def _clean_company_name(el):
     """Extract company name from an element, stripping badge/pill child elements."""
     if not el: return ''
@@ -419,7 +432,8 @@ def scrape_internshala(search_term, location, count=20):
                     href = link['href']
                     if href.startswith('/'): href = 'https://internshala.com' + href
                 if title and company:
-                    page_rows.append(_job(title, company, loc_t, 'Internship/FT', stipend, '', href, 'internshala'))
+                    page_rows.append(_job(title, company, loc_t, 'Internship/FT', stipend, '', href, 'internshala',
+                                          date_posted=_internshala_posted(card)))
             # GATE 2 — does this page actually answer the query? A generic listing
             # that slipped past gate 1 still scores ~0% relevance and is discarded
             # here rather than returned as a result.

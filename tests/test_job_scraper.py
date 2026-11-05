@@ -45,6 +45,20 @@ def test_iso_date(value, expected):
     assert J._iso_date(value) == expected
 
 
+@pytest.mark.parametrize('label, expected', [
+    ('Today', '2026-11-06'),
+    ('Few hours ago', '2026-11-06'),
+    ('1 day ago', '2026-11-05'),
+    ('5 days ago', '2026-11-01'),
+    ('3 weeks ago', ''),                         # a date from this would look exact; it isn't
+])
+def test_internshala_posted_label(label, expected):
+    from bs4 import BeautifulSoup
+    card = BeautifulSoup('<div class="individual_internship"><div class="status-li">Fresher Job</div>'
+                         f'<div class="status-success">{label}</div></div>', 'lxml')
+    assert J._internshala_posted(card, today=date(2026, 11, 6)) == expected
+
+
 def test_jobspy_keeps_the_date_the_board_posted_the_job(monkeypatch):
     import jobspy
     df = pd.DataFrame([
