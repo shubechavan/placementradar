@@ -31,6 +31,7 @@ jobs:
         env:
           MONGO_URI:   ${{ secrets.MONGO_URI }}
           ALLOW_REMOTE_DB: "1"
+          TZ:          IST-5:30       # India time, like the web server (see Dockerfile)
           JOB_ID:      ${{ inputs.job_id }}
           PARAMS_JSON: ${{ inputs.params_json }}
         run: python scrape_worker.py

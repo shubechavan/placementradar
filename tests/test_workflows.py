@@ -23,6 +23,12 @@ def test_scraper_step_allows_its_production_writes():
     assert str(env.get('ALLOW_REMOTE_DB')) == '1'
 
 
+def test_scraper_step_saves_india_time():
+    # Jobs saved here get their Added time from this clock; see test_dockerfile.
+    env = scraper_step().get('env') or {}
+    assert env.get('TZ') == 'IST-5:30'
+
+
 def test_scraper_step_reads_the_database_from_a_secret():
     env = scraper_step().get('env') or {}
     assert '${{ secrets.MONGO_URI }}' in str(env.get('MONGO_URI'))

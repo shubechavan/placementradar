@@ -24,6 +24,14 @@ def test_image_ships_folders_flask_serves_from(folder):
     assert folder in copied_sources(), f'Dockerfile does not COPY {folder}/ into the image'
 
 
+def test_image_keeps_india_time():
+    # Timestamps are saved without a zone and the browser reads them as local (India)
+    # time, so a UTC server showed every time 5.5 hours early. The POSIX form works
+    # without the tzdata package, which the slim image may not have.
+    text = open(os.path.join(ROOT, 'Dockerfile'), encoding='utf-8').read()
+    assert re.search(r'^ENV TZ=IST-5:30$', text, re.M)
+
+
 def test_image_never_ships_contact_data():
     # Real HR names and emails live in MongoDB; the image reads them from there.
     assert not [s for s in copied_sources() if s.endswith('.csv')], 'Dockerfile copies a CSV'

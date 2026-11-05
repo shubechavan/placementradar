@@ -2,6 +2,10 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+# Times are saved without a zone and shown as India time; on UTC they were 5.5 hours
+# early. POSIX form, so it works without the tzdata package.
+ENV TZ=IST-5:30
+
 # System libs required by lxml (used by BeautifulSoup)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
