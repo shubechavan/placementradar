@@ -127,9 +127,6 @@ JUSTDIAL_CITIES = [
     'mumbai','delhi','bangalore','hyderabad','pune','chennai',
     'kolkata','ahmedabad','surat','jaipur','india',
 ]
-ZAUBA_KEYWORDS = ['pvt','ltd','private','limited','technologies','tech',
-                  'corp','enterprise','associates','consulting','group',
-                  'services','solutions','india','international']
 
 # Cache sentinels
 _MISS = object()
@@ -347,7 +344,6 @@ def _enrich_single_job(job, cache, cache_lock, serper_key=''):
         # the page — which on a wrong guess is an attribution leak.
         has_real_url = bool(company_url) or bool(_confirmed)
         base_url     = company_url or (f'https://{company_domain}' if company_domain else None)
-        needs_zauba  = bool(company and any(kw in company.lower() for kw in ZAUBA_KEYWORDS))
 
         site_ck  = f'site:{company_domain}' if (company_domain and company_domain not in JOB_BOARD_DOMAINS) else None
         zauba_ck = f'zauba:{company.lower()}' if company else None
@@ -367,14 +363,14 @@ def _enrich_single_job(job, cache, cache_lock, serper_key=''):
         fetch_futs = {}
         if site_cached is _MISS and base_url and site_ck:
             fetch_futs['site']  = sub.submit(_scrape_company_site, base_url, company_domain, has_real_url)
-        if zauba_cached is _MISS and needs_zauba:
-            fetch_futs['zauba'] = sub.submit(_scrape_zauba, company)
+        # Zauba, Sulekha and TradeIndia are not called (re-checked 6 Nov 2026): Sulekha
+        # answers 403, TradeIndia's search lists no companies, and Zauba's email is the
+        # registered statutory-notice address, usually the CA/CS firm, not HR, often on
+        # another firm's domain. Their scrapers stay for tools/bench.py.
         if jd_cached is _MISS and company:
             fetch_futs['jd']    = sub.submit(_scrape_justdial, company, location)
         if company:
             fetch_futs['im']        = sub.submit(_scrape_indiamart, company)
-            fetch_futs['sulekha']   = sub.submit(_scrape_sulekha, company, location)
-            fetch_futs['tradeindia'] = sub.submit(_scrape_tradeindia, company)
         if base_url and site_ck:
             fetch_futs['photon'] = sub.submit(_photon_crawl, base_url, company_domain or '')
         if serper_key and company:
