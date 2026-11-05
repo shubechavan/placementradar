@@ -12,10 +12,12 @@ if not os.environ.get('MONGO_URI'):
     print('[ERROR] MONGO_URI not set')
     sys.exit(1)
 
-from database import (init_db, get_settings, save_search, save_jobs,
+from database import (init_db, get_settings, save_search, save_jobs, _get_db,
                       update_search_count, get_custom_sites, update_scrape_job)
 from job_scraper import scrape_jobs as do_scrape
 from contact_finder import enrich_with_contacts
+import hr_database_lookup
+import hr_directory
 
 
 def _prog(job_id, pct, msg):
@@ -35,6 +37,8 @@ def main():
     search_id = params.get('search_id', '')
 
     init_db()
+    # HR contacts come from MongoDB; hr_database.csv is not in the repo.
+    hr_database_lookup.set_loader(lambda: hr_directory.all_contacts(_get_db().hr_contacts))
     settings = get_settings()
 
     try:

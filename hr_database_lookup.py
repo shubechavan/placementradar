@@ -1,6 +1,8 @@
 """
-hr_database.py — Local Indian HR contacts database
-Bundled CSV lookup — works offline, zero API calls, instant results.
+hr_database.py — Indian HR contacts lookup used during searches.
+The app and the scrape worker register a loader that reads MongoDB's hr_contacts (the
+2,054-contact HR database). hr_database.csv is only a local fallback: it holds real
+contacts, so it is not in git or the Docker image.
 
 Sources compiled from:
 - Avinash Singh's viral Substack post (50+ companies, Jul 2024)
@@ -18,11 +20,28 @@ DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'hr_database.
 
 # Cache in memory after first load
 _db = None
+_loader = None
+
+
+def set_loader(fn):
+    """Read contacts from fn() (MongoDB's hr_contacts rows) instead of the CSV."""
+    global _loader, _db
+    _loader, _db = fn, None
+
 
 def _load():
     global _db
     if _db is not None:
         return _db
+    # shortcut: loaded once per process, so a contact added on the HR page reaches
+    # in-process searches after a restart; each GitHub Actions search is a fresh process.
+    if _loader:
+        try:
+            _db = [{k: str(v or '').strip() for k, v in r.items()} for r in _loader()]
+            print(f"[HR DB] Loaded {len(_db)} contacts from the database")
+            return _db
+        except Exception as e:
+            print(f"[HR DB] database load failed, falling back to {DB_PATH}: {e}")
     _db = []
     try:
         with open(DB_PATH, 'r', encoding='utf-8') as f:
@@ -107,8 +126,7 @@ def add_entry(company, hr_email, hr_name='', designation='HR', city='', source='
         }
         with open(DB_PATH, 'a', encoding='utf-8', newline='') as f:
             csv.DictWriter(f, fieldnames=FIELDS).writerow(row)
-        global _db
-        _db = None  # Bust cache so next lookup sees new entry
+        db.append(row)   # reloading would drop rows that came from the loader
         return True
     except Exception:
         return False

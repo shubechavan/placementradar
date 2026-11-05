@@ -21,7 +21,8 @@ COPY templates/ ./templates/
 # The single-page app's CSS, JS, fonts and vendored React. Without it the page
 # shell loads but every asset 404s and the site renders blank.
 COPY static/ ./static/
-COPY hr_database.csv ./
+# hr_database.csv is not copied: it holds real HR contacts, which the app reads from
+# MongoDB's hr_contacts instead.
 
 # Non-root user (security best practice)
 RUN adduser --disabled-password --no-create-home appuser \

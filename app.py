@@ -29,10 +29,15 @@ from database import (init_db, get_settings, save_settings, save_search,
                       STAGE_TO_STATUS, get_user_by_id, get_job_owner)
 import auth
 import rate_limit
+import hr_database_lookup
+import hr_directory
+from database import _get_db
 from datetime import datetime, timedelta
 
 app = Flask(__name__)
 init_db()
+# Searches look HR contacts up in MongoDB's hr_contacts (the HR database page's data).
+hr_database_lookup.set_loader(lambda: hr_directory.all_contacts(_get_db().hr_contacts))
 auth.init_app_secret(app)          # signed-session secret + hardened cookie flags
 auth.bootstrap_first_admin()       # seed the sir's admin account on first run
 
