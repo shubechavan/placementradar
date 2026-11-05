@@ -18,6 +18,13 @@ def scraper_step():
     raise AssertionError('no step runs scrape_worker.py')
 
 
+def test_ci_runs_the_tests_before_building_the_image():
+    jobs = yaml.safe_load(open(os.path.join(ROOT, '.github/workflows/deploy.yml'), encoding='utf-8'))['jobs']
+    testers = [n for n, j in jobs.items() if any('pytest' in str(s.get('run', '')) for s in j.get('steps', []))]
+    needs = jobs['build'].get('needs', [])
+    assert testers and set(testers) <= set([needs] if isinstance(needs, str) else needs)
+
+
 def test_scraper_step_allows_its_production_writes():
     env = scraper_step().get('env') or {}
     assert str(env.get('ALLOW_REMOTE_DB')) == '1'
