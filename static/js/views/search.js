@@ -3,20 +3,19 @@ import { html, useState, useEffect, useRef, api, toast, grade, phones, primaryEm
 import { Icon, Grade, Avatar, Empty } from '../ui.js';
 import { siteName } from './board.js';
 
-// Notes come from a test of every board on 26 Oct 2026 (two searches each).
-const NONE = 'Returned no jobs in the last test.';
+// Only the 7 boards that returned relevant jobs in a test of all 23 on 26 Oct 2026 are
+// offered. Naukri (captcha), Shine, Foundit, Apna, Glassdoor, ZipRecruiter, We Work
+// Remotely, Remote.co, FlexJobs, Built In, Wellfound, YC Startups, Turing, Toptal, Upwork
+// and Contra returned none or the same jobs for every search; their scrapers remain in
+// job_scraper.py for when they are fixed.
 const GROUPS = [
   { title: 'Indian and general boards', sites: [
-    ['indeed', 'Fastest source, with full job descriptions.'], ['linkedin', 'Slower, about 12 seconds.'],
-    ['internshala'], ['naukri', 'Blocked by a captcha at the moment.'],
-    ['shine', NONE], ['foundit', NONE], ['apna', NONE], ['glassdoor', NONE], ['zip_recruiter', 'US and Canada jobs only.'],
+    ['indeed', 'Fastest source, with full job descriptions.'], ['linkedin', 'Slower, about 12 seconds.'], ['internshala'],
   ] },
-  { title: 'Remote boards', sites: [['remoteok', 'Best for software roles.'], ['remotive', 'Few jobs per search.'],
-    ['weworkremotely', NONE], ['remoteco', NONE], ['flexjobs', NONE]] },
-  { title: 'Tech and startup boards', sites: [['himalayas'], ['hn_hiring', 'Monthly Hacker News thread; software roles.'],
-    ['builtin', 'Shows the same jobs whatever you search.'], ['wellfound', NONE], ['yc_startup', NONE], ['turing', NONE]] },
-  { title: 'Freelance and contract', sites: [['toptal', NONE], ['upwork', NONE], ['contra', NONE]] },
+  { title: 'Remote boards', sites: [['remoteok', 'Best for software roles.'], ['remotive', 'Few jobs per search.']] },
+  { title: 'Tech and startup boards', sites: [['himalayas'], ['hn_hiring', 'Monthly Hacker News thread; software roles.']] },
 ];
+const OFFERED = GROUPS.flatMap((g) => g.sites.map(([s]) => s));
 // Measured 26 Oct 2026: Indeed and LinkedIn returned 25 jobs per search; Naukri returned
 // none (captcha) and Google Jobs is paused on the server, so the old default found jobs
 // on Internshala alone.
@@ -27,6 +26,8 @@ const remembered = () => {
     const s = JSON.parse(localStorage.getItem('pr.search') || 'null');
     // Anyone still on the old default gets the new one; a hand-picked set is kept.
     if (s && s.sites && [...s.sites].sort().join() === OLD_DEFAULT.join()) s.sites = DEFAULT_SITES;
+    // A board no longer offered can't be unticked, so drop it from a saved selection.
+    if (s && s.sites) { s.sites = s.sites.filter((x) => OFFERED.includes(x)); if (!s.sites.length) s.sites = DEFAULT_SITES; }
     return s;
   } catch (e) { return null; }
 };
@@ -75,7 +76,7 @@ export function JobSearch() {
       if (s.status === 'error') { setErr(s.message || 'The search stopped with an error.'); setRun(null); return; }
       try { const r = await api.get(`/api/results/${id}`); setResults(r.results || []); } catch (e) { setResults([]); }
       const n = s.count || (s.stats && s.stats.total) || 0;
-      toast(n ? `Found and saved ${plural(n, 'job')}.` : 'No jobs found. Try Google Jobs, Internshala and Naukri on their own.', n ? 'info' : 'error');
+      toast(n ? `Found and saved ${plural(n, 'job')}.` : 'No jobs found. Try a broader role or another city.', n ? 'info' : 'error');
       setRun((r) => r && { ...r, status: 'done' });
     }
   }
@@ -127,7 +128,7 @@ export function JobSearch() {
           <a className="btn btn-sm" href="#/board">Open the Job board</a>
           ${run && html`<a className="btn btn-sm" href=${'/api/export?source=scrape&job_id=' + encodeURIComponent(run.id)} download><${Icon} name="download" size=${16} />Export CSV</a>`}
         </div></div>
-      ${!results.length ? html`<${Empty} title="This search found no jobs.">Some boards block automated searches. Try Google Jobs, Internshala and Naukri on their own, or a broader role.</${Empty}>`
+      ${!results.length ? html`<${Empty} title="This search found no jobs.">Try a broader role or another city. Indeed and LinkedIn usually return the most jobs.</${Empty}>`
       : html`<div className="table-wrap" tabIndex="0" aria-label="Search results, scrolls sideways"><table className="ledger-table is-static"><thead><tr>
           <th className="c-co">Company</th><th>Grade</th><th>Phone</th><th>Email</th><th>Role</th><th>Source</th></tr></thead><tbody>
           ${results.map((r, i) => { const ph = phones(r)[0], em = primaryEmail(r); return html`<tr key=${r.job_url || i}>
