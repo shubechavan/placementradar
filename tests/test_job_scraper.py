@@ -129,6 +129,47 @@ def test_remotive_drops_jobs_the_api_returned_off_query(fake_get):
     assert rows[0]['date_posted'] == '2026-11-02'
 
 
+def test_internshala_drops_cards_with_nothing_in_common_with_the_search(fake_get):
+    # Measured live 6 Nov 2026: a "data analyst" search returned 40 cards, including
+    # Telecaller, Admission Counsellor and Sales Executive — Internshala's own search
+    # mixes in results with no relation to the query, and nothing in the scraper
+    # checked each card against the term (only RemoteOK and Remotive did).
+    html = '''<div class="individual_internship">
+      <div class="job-internship-name">Data Analyst</div><div class="company-name">Acme Analytics</div></div>
+    <div class="individual_internship">
+      <div class="job-internship-name">Telecaller</div><div class="company-name">CallCo</div></div>'''
+
+    # FakeResponse.url defaults to '', which redirected_to_generic() reads as path '/' —
+    # a real generic listing. Set it to the requested URL so gate 1 judges it correctly.
+    def handler(url, params):
+        resp = FakeResponse(200, text=html)
+        resp.url = url
+        return resp
+    fake_get(handler)
+    rows = J.scrape_internshala('data analyst', 'India', 20)
+    assert [r['title'] for r in rows] == ['Data Analyst']
+
+
+def test_internshala_still_falls_through_a_mostly_noise_page_to_a_better_one(fake_get):
+    # Regression for a fix that filtered cards BEFORE judging the page: a page with 1
+    # relevant card out of 20 looked 100% relevant once the other 19 were stripped, so
+    # the scraper settled for it instead of trying the next, much better candidate.
+    weak = '<div class="individual_internship"><div class="job-internship-name">Data Analyst</div>' \
+          '<div class="company-name">Acme</div></div>' + \
+          '<div class="individual_internship"><div class="job-internship-name">Telecaller</div>' \
+          '<div class="company-name">CallCo</div></div>' * 19
+    strong = ''.join(f'<div class="individual_internship"><div class="job-internship-name">Data Analyst</div>'
+                     f'<div class="company-name">Co{i}</div></div>' for i in range(5))
+
+    def handler(url, params):
+        resp = FakeResponse(200, text=weak if url.endswith('-jobs') else strong)
+        resp.url = url
+        return resp
+    fake_get(handler)
+    rows = J.scrape_internshala('data analyst', 'India', 20)
+    assert [r['company'] for r in rows] == [f'Co{i}' for i in range(5)]
+
+
 def test_naukri_records_captcha_block(fake_get):
     fake_get(lambda url, params: FakeResponse(406, {'message': 'recaptcha required'}, text='<html></html>'))
     assert J.scrape_naukri('java developer', 'Pune', 10) == []

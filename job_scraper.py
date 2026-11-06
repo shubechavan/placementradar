@@ -434,15 +434,24 @@ def scrape_internshala(search_term, location, count=20):
                 if title and company:
                     page_rows.append(_job(title, company, loc_t, 'Internship/FT', stipend, '', href, 'internshala',
                                           date_posted=_internshala_posted(card)))
-            # GATE 2 — does this page actually answer the query? A generic listing
-            # that slipped past gate 1 still scores ~0% relevance and is discarded
-            # here rather than returned as a result.
+            # GATE 2 — does this page actually answer the query? Judged on EVERY raw card,
+            # before any filtering: a page where only 4 of 44 cards are on topic (9%) must
+            # still fail here and fall through to the next candidate URL, which may be a
+            # much better match. Filtering first would make this page look 100% relevant
+            # (every surviving card matches, by construction) and the better candidate
+            # would never be tried — measured live 6 Nov 2026 on "data analyst": filtering
+            # before this gate dropped 28 good results down to 4.
             bad, detail = response_guard.off_query(
                 [r.get('title', '') for r in page_rows], search_term)
             if bad:
                 _SM.record_failure('internshala',
                                    RuntimeError(f'off-query content: {detail}'), url=url)
                 continue
+            # Within an accepted page, Internshala's own search still mixes in cards with
+            # nothing in common with the term (Telecaller, Admission Counsellor for "data
+            # analyst") — those are dropped now, after the page itself has been trusted.
+            page_rows = [r for r in page_rows
+                        if not response_guard.off_query([r.get('title', '')], search_term)[0]]
             results.extend(page_rows)
             if results: break
     except Exception as _e:
