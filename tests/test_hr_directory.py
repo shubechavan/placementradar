@@ -33,10 +33,12 @@ FOUND = {'company': 'Globex Corp', 'hr_email': 'careers@globex.example', 'design
          'source': 'auto:naukri'}
 
 
-def test_all_contacts_returns_the_six_page_fields_with_blanks_for_missing():
-    rows = HD.all_contacts(FakeCollection([IMPORTED, FOUND]))
+def test_all_contacts_returns_the_page_fields_with_blanks_for_missing():
+    rows = HD.all_contacts(FakeCollection([IMPORTED, dict(FOUND, office_phone='+91 80 5550 0909')]))
     assert rows[1] == {'company': 'Globex Corp', 'hr_email': 'careers@globex.example', 'hr_name': '',
-                       'designation': 'HR', 'city': 'Bangalore', 'source': 'auto:naukri'}
+                       'designation': 'HR', 'city': 'Bangalore', 'source': 'auto:naukri',
+                       'office_phone': '+91 80 5550 0909'}
+    assert rows[0]['office_phone'] == ''
     assert all(set(r) == set(HD.FIELDS) for r in rows)
 
 

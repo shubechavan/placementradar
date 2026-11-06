@@ -471,6 +471,10 @@ def _enrich_single_job(job, cache, cache_lock, serper_key=''):
             if pfx in GENERIC_PREFIXES: continue
             if e not in emails_db: emails_db.append(e)
             sources.setdefault(e, '🗂️ HR Database')
+        for p in _hrdb_phones(db_hits):
+            if p not in phones:
+                phones.append(p)
+                phone_sources.setdefault(p, 'hrdb')
 
         # Rank emails: website first, DB last
         all_emails = list(dict.fromkeys(emails_web + emails_db))
@@ -532,6 +536,13 @@ def _enrich_single_job(job, cache, cache_lock, serper_key=''):
                            source=f'Auto:{src[:20]}')
     except Exception as _e:
         _SM.record_failure('hrdb_write', _e)
+
+
+def _hrdb_phones(hits):
+    """Office lines saved on matching HR database contacts (tools/find_office_numbers.py),
+    as the 10-digit strings the other phone sources produce."""
+    digits = (re.sub(r'\D', '', h.get('office_phone') or '')[-10:] for h in hits)
+    return list(dict.fromkeys(d for d in digits if len(d) == 10))
 
 
 # ═════════════════════════════════════════════════════════════════════════════

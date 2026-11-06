@@ -15,7 +15,7 @@ from datetime import datetime
 
 from hr_database_lookup import _normalize   # the rule that produced hr_contacts.company_norm
 
-FIELDS = ('company', 'hr_email', 'hr_name', 'designation', 'city', 'source')
+FIELDS = ('company', 'hr_email', 'hr_name', 'designation', 'city', 'source', 'office_phone')
 _SEARCHED = ('company', 'hr_email', 'hr_name', 'city')
 _EMAIL = re.compile(r'^[^\s@<>"\']+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$')
 

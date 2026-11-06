@@ -88,6 +88,7 @@ def lookup(company_name):
                     'verified_by':   row.get('verified_by', ''),
                     'last_verified': row.get('last_verified', ''),
                     'status':        row.get('status', 'unverified'),
+                    'office_phone':  row.get('office_phone', ''),   # tools/find_office_numbers.py
                 })
 
     return results

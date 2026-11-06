@@ -1,5 +1,5 @@
 // HR database: the committee's own list of HR contacts. Grows with every search.
-import { html, useState, useEffect, useMemo, api, toast, mailHref, plural } from '../lib.js';
+import { html, useState, useEffect, useMemo, api, toast, mailHref, telHref, plural } from '../lib.js';
 import { Icon, Avatar, Dialog, Empty, ErrorLine } from '../ui.js';
 
 const PAGE = 50;
@@ -11,8 +11,8 @@ const sourceLabel = (s) => {
 };
 function downloadCsv(rows, name) {
   const q = (v) => '"' + String(v ?? '').replace(/"/g, '""') + '"';
-  const body = [['Company', 'HR email', 'HR name', 'Designation', 'City', 'Source'].join(','),
-    ...rows.map((r) => [r.company, r.hr_email, r.hr_name, r.designation, r.city, r.source].map(q).join(','))].join('\r\n');
+  const body = [['Company', 'HR email', 'HR name', 'Designation', 'Office phone', 'City', 'Source'].join(','),
+    ...rows.map((r) => [r.company, r.hr_email, r.hr_name, r.designation, r.office_phone, r.city, r.source].map(q).join(','))].join('\r\n');
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob(['﻿' + body], { type: 'text/csv;charset=utf-8' }));
   a.download = name; document.body.appendChild(a); a.click(); a.remove();
@@ -97,13 +97,16 @@ export function HrDatabase({ params, setParams }) {
     : !filtered.length ? html`<${Empty} title=${`Nothing matches “${q}”.`}>Check the spelling, or search by city or email domain instead.</${Empty}>`
     : html`<div className="table-wrap" tabIndex="0" aria-label="HR contacts, scrolls sideways">
         <table className="ledger-table is-static"><thead><tr>
-          <th className="c-co">Company</th><th>Name</th><th>Designation</th><th>Email</th><th>City</th><th className="c-src">Source</th>
+          <th className="c-co">Company</th><th>Name</th><th>Designation</th><th>Email</th>
+          <th title="The company's office line from its own website. Call it and ask for the person by name.">Office phone</th>
+          <th>City</th><th className="c-src">Source</th>
         </tr></thead><tbody>
         ${shown.map((r, i) => html`<tr key=${(r.hr_email || '') + i}>
           <td className="c-co"><div className="co-cell"><${Avatar} name=${r.company} /><span className="co-name">${r.company || 'Unnamed company'}</span></div></td>
           <td>${r.hr_name || ''}</td>
           <td className="muted">${r.designation || ''}</td>
           <td className="c-mail"><div>${mailHref(r.hr_email) ? html`<a href=${mailHref(r.hr_email)}>${r.hr_email}</a>` : r.hr_email}</div></td>
+          <td className="c-phone">${r.office_phone && (telHref(r.office_phone) ? html`<a href=${telHref(r.office_phone)}>${r.office_phone}</a>` : r.office_phone)}</td>
           <td>${r.city || ''}</td>
           <td className="c-src">${sourceLabel(r.source)}</td></tr>`)}
         </tbody></table></div>

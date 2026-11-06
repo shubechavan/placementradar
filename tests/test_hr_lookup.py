@@ -21,6 +21,13 @@ def test_lookup_reads_rows_from_the_registered_loader():
     assert [h['hr_email'] for h in H.lookup('Acme Analytics Pvt Ltd')] == ['priya@acme.example']
 
 
+def test_a_search_gets_the_office_line_saved_on_a_matching_hr_contact():
+    import contact_finder as C
+    H.set_loader(lambda: [dict(ROWS[0], office_phone='+91 120 499 8925'),
+                          {'company': 'Acme Analytics', 'hr_email': 'ravi@acme.example', 'office_phone': '+91 120 499 8925'}])
+    assert C._hrdb_phones(H.lookup('Acme Analytics')) == ['1204998925']
+
+
 def test_auto_saved_contact_keeps_the_loaded_rows():
     H.set_loader(lambda: ROWS)
     assert H.add_entry('Beta Systems', 'hr@beta.example')
