@@ -3,6 +3,7 @@ import { html, useState, useEffect, useMemo, api, toast, mailHref, telHref, plur
 import { Icon, Avatar, Dialog, Empty, ErrorLine } from '../ui.js';
 
 const PAGE = 50;
+const PHONE_FILTERS = [['', 'Any'], ['yes', 'Has office phone'], ['no', 'No office phone yet']];
 const sourceLabel = (s) => {
   const t = String(s || '').trim();
   if (!t) return '';
@@ -52,7 +53,7 @@ export function HrDatabase({ params, setParams }) {
   const [stats, setStats] = useState({});
   const [error, setError] = useState('');
   const [adding, setAdding] = useState(false);
-  const q = params.q || '', page = Math.max(1, parseInt(params.page || '1', 10) || 1);
+  const q = params.q || '', phone = params.phone || '', page = Math.max(1, parseInt(params.page || '1', 10) || 1);
 
   async function load() {
     setError('');
@@ -64,9 +65,11 @@ export function HrDatabase({ params, setParams }) {
   const filtered = useMemo(() => {
     if (!rows) return [];
     const n = q.trim().toLowerCase();
-    const out = n ? rows.filter((r) => `${r.company} ${r.hr_email} ${r.hr_name} ${r.city}`.toLowerCase().includes(n)) : rows;
+    let out = n ? rows.filter((r) => `${r.company} ${r.hr_email} ${r.hr_name} ${r.city}`.toLowerCase().includes(n)) : rows;
+    if (phone === 'yes') out = out.filter((r) => r.office_phone);
+    if (phone === 'no') out = out.filter((r) => !r.office_phone);
     return [...out].sort((a, b) => String(a.company || '').localeCompare(String(b.company || '')));
-  }, [rows, q]);
+  }, [rows, q, phone]);
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE)), cur = Math.min(page, pages);
   const shown = filtered.slice((cur - 1) * PAGE, cur * PAGE);
   const autoCount = (rows || []).filter((r) => /^auto:/i.test(r.source || '')).length;
@@ -88,8 +91,11 @@ export function HrDatabase({ params, setParams }) {
       <div className="search-input"><${Icon} name="search" size=${16} />
         <label className="vh" for="hr-q">Search the HR database</label>
         <input id="hr-q" className="input" type="search" placeholder="Search company, name, email, city" value=${q}
-          onInput=${(e) => setParams({ q: e.target.value })} /></div>
-      ${rows && q && html`<span className="tally">${filtered.length.toLocaleString('en-IN')} of ${plural(rows.length, 'contact')}</span>`}
+          onInput=${(e) => setParams({ q: e.target.value, phone })} /></div>
+      <label className="vh" for="hr-phone">Office phone</label>
+      <select id="hr-phone" className="select" value=${phone} onChange=${(e) => setParams({ q, phone: e.target.value })}>
+        ${PHONE_FILTERS.map(([k, l]) => html`<option key=${k} value=${k}>${l}</option>`)}</select>
+      ${rows && (q || phone) && html`<span className="tally">${filtered.length.toLocaleString('en-IN')} of ${plural(rows.length, 'contact')}</span>`}
     </div>
     ${error ? html`<${ErrorLine} message=${'The HR database didn’t load. ' + error} onRetry=${load} />`
     : !rows ? html`<div aria-busy="true">${[0, 1, 2, 3].map((i) => html`<div key=${i} className="skeleton-row"></div>`)}</div>`
